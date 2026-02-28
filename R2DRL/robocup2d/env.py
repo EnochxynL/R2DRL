@@ -66,8 +66,15 @@ class Robocup2dEnv:
 
         if inactive_idx.size > 0:
             out[inactive_idx] = 0
-            out[inactive_idx, self.agents.player_list[0].default_base_action] = 1
-
+            if self.agents.is_hybrid:
+                default_a = int(
+                    self.agents.player_list[0].default_hybrid_action[0]
+                )
+            else:
+                default_a = int(
+                    self.agents.player_list[0].default_base_action
+                )
+            out[inactive_idx, default_a] = 1
         self.last_avail_actions = out
         return self.last_avail_actions
 
