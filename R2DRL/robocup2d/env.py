@@ -18,7 +18,7 @@ class Robocup2dEnv:
         self.log = get_env_logger("robocup_env")
         self.config = EnvConfig(load_env_args(cfg, env_args))
 
-        self.agent_mask = np.zeros(self.config.n1, dtype=bool)
+        self.agent_mask = np.ones(self.config.n1, dtype=bool)
 
         self.child_env = os.environ.copy()
         base_ld = os.environ.get("LD_LIBRARY_PATH", "")
