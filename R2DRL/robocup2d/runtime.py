@@ -7,10 +7,14 @@ import uuid
 import time
 import signal
 from typing import List, Optional, Dict, Tuple
-
+import socket
 from . import process as proc
 from .protocols import P
 from . import ipc
+
+
+
+
 
 
 class Runtime:
@@ -143,22 +147,6 @@ class Runtime:
         )
         self.procs.append(p)
 
-        # ---------- trainer ----------
-        p, _ = proc.launch_trainer(
-            trainer_dir=self.config.trainer_dir,
-            trainer_exe=self.config.trainer_exe,
-            host=self.config.host,
-            trainer_port=self.trainer_port,
-            team1=self.config.team1,
-            team2=self.config.team2,
-            logs_dir=self.log_dir,
-            trainer_shm_name=self.trainer_shm_id,
-            env=env,
-            log_tag=f"{self.run_id}_",
-            server_wait_seconds=self.config.server_wait_seconds,
-        )
-        self.procs.append(p)
-
         # ---------- players ----------
         player_procs, _ = proc.launch_players(
             player_dir=self.config.player_dir,
@@ -181,13 +169,31 @@ class Runtime:
         )
         self.procs.extend(player_procs)
 
+        time.sleep(5)
+        # ---------- trainer ----------
+        p, _ = proc.launch_trainer(
+            trainer_dir=self.config.trainer_dir,
+            trainer_exe=self.config.trainer_exe,
+            host=self.config.host,
+            trainer_port=self.trainer_port,
+            team1=(self.config.team1 if self.config.team1 != self.config.team2 else self.config.team1 + "_L"),
+            team2=(self.config.team2 if self.config.team1 != self.config.team2 else self.config.team2 + "_R"),
+            logs_dir=self.log_dir,
+            trainer_shm_name=self.trainer_shm_id,
+            env=env,
+            log_tag=f"{self.run_id}_",
+            server_wait_seconds=self.config.server_wait_seconds,
+        )
+        self.procs.append(p)
+
+
         # ---------- coach ----------
         p, _ = proc.launch_coach(
             coach_dir=self.config.coach_dir,
             coach_exe=self.config.coach_exe,
             host=self.config.host,
             coach_port=self.coach_port,
-            coach_team=self.config.team1,
+            coach_team=(self.config.team1 if self.config.team1 != self.config.team2 else self.config.team1 + "_L"),
             coach_shm_name=self.coach_shm_id,
             logs_dir=self.log_dir,
             env=env,
