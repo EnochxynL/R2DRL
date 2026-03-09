@@ -8,6 +8,7 @@ from typing import Dict, IO, List, Optional, Sequence, Tuple, Union
 import time
 LogFP = Union[int, IO[str]]
 
+
 @dataclass
 class ProcInfo:
     p: subprocess.Popen
@@ -346,7 +347,7 @@ def launch_players(
     time.sleep(0.1)  # slight delay to avoid all players starting at the exact same time
     for unum in range(2, int(n1) + 1):
         _launch_one(1, team1, unum, mode1)
-    time.sleep(1)
+    time.sleep(5)
     # team2
     for unum in range(1, int(n2) + 1):
         _launch_one(2, team2, unum, mode2)

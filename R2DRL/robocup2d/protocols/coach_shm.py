@@ -141,3 +141,4 @@ class Coach:
 
     def clear_goal_flag(self) -> None:
         struct.pack_into(_I32, self.buf, OFFSET_GOAL, 0)
+

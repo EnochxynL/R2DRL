@@ -5,7 +5,6 @@ import numpy as np
 from .protocols import P
 from . import ipc
 import time
-from collections import Counter
 from collections import Counter, defaultdict
 
 Flags = Tuple[int, int]
@@ -26,6 +25,7 @@ class Agents:
         self.coach_shm_id = coach_shm_id
         self.trainer_shm_id = trainer_shm_id
         self.player_shm_ids = dict(player_shm_ids)
+        self.agent_mask = np.ones(self.config.n1, dtype=bool)
         self.DEFAULT_BALL =  (0.0, 0.0, 0.0, 0.0)
         self.DEFAULT_LEFT_PLAYERS = [
             (-50.0,   0.0,   0.0, 0.0, 0.0),   # GK
@@ -63,10 +63,11 @@ class Agents:
             [0.0]*11 + [180.0]*11,
             dtype=np.float32
         )        
-        self.CUSTOM_BALL =  (0.0, 0.0, 0.0, 0.0)
-        self.CUSTOM_LEFT_PLAYERS: Sequence[Tuple[float, float, float, float, float]] =  [(-49.4387, 0.029, -90.207, 0.0, 0.0), (-1.8956, -21.2768, -12.76, 0.0, 0.0), (-1.0371, -4.6357, 172.306, 0.0, 0.0), (17.7481, -34.0658, 160.413, 0.0, 0.0), (7.1177, 8.723, 172.359, 0.0, 0.0), (10.6807, -13.5384, 171.579, 0.0, 0.0), (22.3294, -19.5177, -177.306, 0.0, 0.0), (23.066, -2.1292, 170.898, 0.0, 0.0), (36.7086, -31.193, -171.773, 0.0, 0.0), (32.6056, 1.8079, 145.407, 0.0, 0.0), (35.4272, -15.268, -179.539, 0.0, 0.0)]
-        self.CUSTOM_RIGHT_PLAYERS: Sequence[Tuple[float, float, float, float, float]] =  [(49.7485, -4.62, -89.45, 0.0, 0.0), (0.5068, 0.7291, -154.191, 0.0, 0.0), (3.1451, -14.8675, -172.486, -0.6315, -0.09), (-10.1413, 9.4502, -135.735, 0.0, 0.0), (0.2775, -25.688, -176.48, 0.0, 0.0), (-19.6433, -12.3095, 149.132, -0.0427, 0.018), (-32.7386, -2.1781, 159.54, -0.913, 0.3405), (-19.277, -21.7438, 158.069, -0.8697, 0.3492), (-38.6289, 8.4134, -172.946, -0.967, -0.1197), (-40.6348, -25.915, 113.017, -0.385, 0.8965), (-39.8167, -14.8103, -158.944, -0.0398, -0.0137)]
-        self.CUSTOM_BODY_ANGLES = np.array([-90.207, -12.76, 172.306, 160.413, 172.359, 171.579,-177.306, 170.898, -171.773, 145.407, -179.539,-89.45, -154.191, -172.486, -135.735, -176.48,149.132, 159.54, 158.069, -172.946, 113.017, -158.944],dtype=np.float32,)
+        self.CUSTOM_BALL =  (-13.1491, 19.7303, 0.4673, 0.561)
+        self.CUSTOM_LEFT_PLAYERS: Sequence[Tuple[float, float, float, float, float]] =  [(-49.8471, 5.9114, 90.356, 0.0, 0.0), (-23.1647, 3.9302, 1.776, 0.633, 0.0055), (-28.0549, 13.5735, 10.179, 0.9778, 0.1767), (-23.6264, -7.5945, -10.685, 0.9828, -0.1855), (-29.2598, 20.0184, 25.46, 0.1445, 0.0687), (-21.7763, 9.0218, 25.515, 0.87, 0.4077), (-17.4081, -4.1642, -10.551, 0.977, -0.1805), (-18.63, 18.1475, 2.413, 0.9928, 0.0432), (-7.6974, -18.9974, -18.357, 0.0057, -0.002), (-14.6238, 18.5795, 49.841, 0.557, 0.6262), (-1.8707, 8.3827, 12.983, 0.23, 0.1507)]
+        self.CUSTOM_RIGHT_PLAYERS: Sequence[Tuple[float, float, float, float, float]] =  [(49.7789, 0.0, 90.607, 0.0, 0.0), (7.2389, 14.1914, 165.824, 0.0735, -0.0617), (5.6635, -0.2856, 136.878, 0.1797, 0.2612), (0.7673, 24.3103, 5.875, 0.5982, 0.0612), (-1.1262, -12.1448, 85.99, 0.2405, 0.019), (-5.0331, 9.6253, 48.578, 0.625, 0.4938), (-17.194, 18.044, 7.491, 0.985, 0.1307), (-17.451, -2.6793, 53.843, 0.5495, 0.6667), (-27.949, 26.1856, 3.103, 0.749, 0.0835), (-26.6065, -17.2931, -31.572, 0.852, -0.5235), (-24.2801, 13.6549, 12.76, 0.9752, 0.2208)]
+        self.CUSTOM_BODY_ANGLES =  [90.356, 1.776, 10.179, -10.685, 25.46, 25.515, -10.551, 2.413, -18.357, 49.841, 12.983, 90.607, 165.824, 136.878, 5.875, 85.99, 48.578, 7.491, 53.843, 3.103, -31.572, 12.76]
+        
         (
             self.coach_shms,
             self.trainer_shms,
@@ -106,6 +107,7 @@ class Agents:
 
         self._obs_buf = np.empty((len(self.player_list), P.player.STATE_NUM),dtype=np.float32,)
         self._mask_buf = np.empty((len(self.player_list), self.n_actions),dtype=np.int32,)
+        
         
     def get_player(self, team: int, unum: int) -> P.player.Player:
         return self.players[(team, unum)]
@@ -206,55 +208,40 @@ class Agents:
 
         return self._mask_buf
 
-    def write_base_actions(self, actions: np.ndarray, agent_mask: np.ndarray):
-        """
-        actions: (n1,) team1 动作
-        agent_mask: (n1,) bool
-        """
-
+    def write_base_actions(self, actions: np.ndarray):
         n1 = self.config.n1
 
         for idx, p in enumerate(self.player_list):
-
-            if idx < n1:  # team1
-                if agent_mask[idx]:
-                    act = int(actions[idx])
-                else:
-                    act = p.default_base_action
-            else:         # team2
-                act = p.default_base_action
+            if idx < n1:
+                act = int(actions[idx])
+            else:
+                act = int(p.default_base_action)
 
             p.write_base_action(act)
             p.write_request()
 
-    def write_hybrid_actions(self, actions: np.ndarray, agent_mask: np.ndarray):
-        """
-        actions: (n1, 3)  -> [a, u0, u1]
-        agent_mask: (n1,) bool
-        """
-
+    def write_hybrid_actions(self, actions: np.ndarray):
         n1 = self.config.n1
 
         for idx, p in enumerate(self.player_list):
-
-            if idx < n1:  # team1
-                if agent_mask[idx]:
-                    a  = int(actions[idx, 0])
-                    u0 = float(actions[idx, 1])
-                    u1 = float(actions[idx, 2])
-                else:
-                    a, u0, u1 = p.default_hybrid_action
+            if idx < n1:
+                a  = int(actions[idx, 0])
+                u0 = float(actions[idx, 1])
+                u1 = float(actions[idx, 2])
             else:
                 a, u0, u1 = p.default_hybrid_action
+                a = int(a)
+                u0 = float(u0)
+                u1 = float(u1)
 
             p.write_hybrid_action(a, u0, u1)
             p.write_request()
 
-    def write_actions(self, actions: np.ndarray, agent_mask: np.ndarray):
+    def write_actions(self, actions: np.ndarray):
         if self.config.team1 == "hybrid":
-            self.write_hybrid_actions(actions, agent_mask)
+            self.write_hybrid_actions(actions)
         else:
-            self.write_base_actions(actions, agent_mask)
+            self.write_base_actions(actions)
 
     def wait_all_ready(
         self,
@@ -327,6 +314,10 @@ class Agents:
                         obj.noop()
                     else:
                         obj.take_default_action(is_hybrid=(self.config.team1 == "hybrid"))
+                        if self.log:
+                            self.log.info(
+                            f"[rescue] dist={self.read_all_flags()}"
+                            )
 
                     pushed += 1
 
@@ -402,3 +393,58 @@ class Agents:
             "dist": Counter(pairs),
             "trainer": tab,
         }
+
+    def get_team1_obs(self, norm: bool = True, zero_inactive: bool = True):
+        full_obs = self.obs(norm=norm)
+        out = full_obs[:self.config.n1].copy()
+
+        if zero_inactive:
+            inactive_idx = np.flatnonzero(~self.agent_mask)
+            for i in inactive_idx:
+                out[i].fill(0.0)
+
+        return out
+    
+    def get_team1_avail_actions(self):
+        
+        full_mask = self.avail_actions()
+        out = full_mask[:self.config.n1].copy()
+        inactive_idx = np.flatnonzero(~self.agent_mask)
+
+        if inactive_idx.size > 0:
+            out[inactive_idx] = 0
+            for idx in inactive_idx:
+                if self.config.team1 == "hybrid":
+                    default_a = int(self.player_list[idx].default_hybrid_action[0])
+                else:
+                    default_a = int(self.player_list[idx].default_base_action)
+                out[idx, default_a] = 1
+
+        return out
+
+    def set_agent_mask(self, n: int) -> np.ndarray:
+        n1 = int(self.config.n1)
+
+        if n < 0:
+            raise ValueError(f"n must be >= 0, got {n}")
+
+        n = min(int(n), n1)
+
+        state = self.state(norm=False)
+
+        bx = float(state[0])
+        by = float(state[1])
+
+        players = state[4:].reshape(22, 6)
+        team1_players = players[:n1]
+
+        px = team1_players[:, 0]
+        py = team1_players[:, 1]
+
+        dists = np.sqrt((px - bx) ** 2 + (py - by) ** 2)
+        nearest_idx = np.argsort(dists)[:n]
+
+        self.agent_mask[:] = False
+        self.agent_mask[nearest_idx] = True
+
+        return self.agent_mask.copy()

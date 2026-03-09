@@ -4,7 +4,6 @@ import torch
 import os
 import numpy as np
 from .protocols import P
-from . import ipc
 from .logging_utils import get_env_logger
 from .config import load_env_args, EnvConfig
 from .runtime import Runtime
@@ -17,8 +16,6 @@ class Robocup2dEnv:
 
         self.log = get_env_logger("robocup_env")
         self.config = EnvConfig(load_env_args(cfg, env_args))
-
-        self.agent_mask = np.ones(self.config.n1, dtype=bool)
 
         self.child_env = os.environ.copy()
         base_ld = os.environ.get("LD_LIBRARY_PATH", "")
@@ -54,28 +51,14 @@ class Robocup2dEnv:
         self.score = [0, 0]
         self._closed = False
         self.episode_limit = self.config.episode_limit
+        print("self.config.curriculum", self.config.curriculum)
 
     def get_avail_actions(self):
 
         if self.done and self.last_avail_actions is not None:
             return self.last_avail_actions
-        
-        full_mask = self.agents.avail_actions()
-        out = full_mask[:self.config.n1].copy()
-        inactive_idx = np.flatnonzero(~self.agent_mask)
 
-        if inactive_idx.size > 0:
-            out[inactive_idx] = 0
-            if self.agents.is_hybrid:
-                default_a = int(
-                    self.agents.player_list[0].default_hybrid_action[0]
-                )
-            else:
-                default_a = int(
-                    self.agents.player_list[0].default_base_action
-                )
-            out[inactive_idx, default_a] = 1
-        self.last_avail_actions = out
+        self.last_avail_actions = self.agents.get_team1_avail_actions()
         return self.last_avail_actions
 
     def reset(self):
@@ -85,6 +68,7 @@ class Robocup2dEnv:
             self._need_restart = False
             self.agents.clear_all_shm_bufs()
             self.runtime.restart()
+            print("restart!!")
 
         self.last_state = None
         self.last_obs = None
@@ -115,7 +99,7 @@ class Robocup2dEnv:
         actions = np.asarray(actions)
  
         self.agents.trainer.noop()
-        self.agents.write_actions(actions, self.agent_mask)
+        self.agents.write_actions(actions)
         self._need_restart = not self.agents.wait_all_ready()
         timeout = (self.episode_steps >= self.episode_limit)
         goal = self.agents.coach.goal()
@@ -146,13 +130,7 @@ class Robocup2dEnv:
         if self.done and self.last_obs is not None:
             return self.last_obs
 
-        full_obs = self.agents.obs(norm=True)
-        out = full_obs[:self.config.n1].copy()
-        inactive_idx = np.flatnonzero(~self.agent_mask)
-        for i in inactive_idx:
-            out[i].fill(0.0)
-
-        self.last_obs = out
+        self.last_obs = self.agents.get_team1_obs(norm=True, zero_inactive=True)
         return self.last_obs
 
     def get_state(self):
@@ -177,4 +155,3 @@ class Robocup2dEnv:
             "obs_shape": int(P.player.STATE_NUM),
             "episode_limit": int(self.episode_limit),
         }
-
