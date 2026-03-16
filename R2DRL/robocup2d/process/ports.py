@@ -103,11 +103,18 @@ def pick_ports(auto_start, auto_end, auto_step,
     raise RuntimeError("no free port block found")
 
 def try_lock_port_block(base: int, prefix: str = "robocup2drl") -> Tuple[Optional[int], str]:
-    path = f"/tmp/{prefix}_portblock_{int(base)}.lock"
+
+    tmp_dir = os.path.expanduser("~/robocup_portlocks")
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    path = f"{tmp_dir}/{prefix}_portblock_{int(base)}.lock"
+
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
+
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return fd, path
+
     except BlockingIOError:
         os.close(fd)
         return None, path

@@ -1,19 +1,107 @@
 from __future__ import annotations
 
-import torch
 import os
-import numpy as np
+import torch
+
 from .protocols import P
 from .logging_utils import get_env_logger
 from .config import load_env_args, EnvConfig
 from .runtime import Runtime
 from .agents import Agents
+from .curriculum import CurriculumController
+from .tb_logger import TBLogger
+
+
+class R2DRL:
+    def __init__(self, cfg="robocup.yaml", **env_args):
+        self.env = Robocup2dEnv(cfg=cfg, **env_args)
+
+        use_tb = self.env.config.tb
+        tb_log_dir = self.env.config.tb_log_dir
+
+        self.tb = TBLogger(
+            log_dir=tb_log_dir,
+            enabled=use_tb,
+        )
+
+        self.controller = CurriculumController(
+            depth_step=self.env.config.depth_step,
+            init_n=self.env.config.init_n,
+        )
+
+        self.global_episode = 0
+
+    def reset(self, *args, **kwargs):
+        key = self.controller.epsilon_generate_key()
+
+        self.controller.apply_state_and_n_by_key(
+            self.env,
+            key=key
+        )
+
+        info = self.env.reset(*args, **kwargs)
+        self.env.agents.set_agent_mask()
+
+        # 只记录当前 episode 对应的 depth / n
+        self.tb.add_scalar("curriculum/current_depth", key[0], self.global_episode)
+        self.tb.add_scalar("curriculum/current_n", key[1], self.global_episode)
+
+        return info
+
+    def step(self, actions):
+        reward, done, info = self.env.step(actions)
+        self.env.agents.set_agent_mask()
+
+        if done:
+            key = self.controller.current_episode_key
+
+            self.controller.update_key_return(key, reward)
+            level = self.controller.classify_key(key)
+            self.controller.update_key_pool(key, level)
+            self.controller.maybe_advance_curriculum()
+
+            d_sum = self.controller._pool_summary(self.controller.d_pool)
+            dm1_sum = self.controller._pool_summary(self.controller.d_minus_1_pool)
+
+            # 只记录你关心的指标
+            self.tb.add_scalar("pool/d/dm1_mean", self.controller.dm1_mean, self.global_episode)
+            self.tb.add_scalar("pool/d/buffer", d_sum["buffer"], self.global_episode)
+            self.tb.add_scalar("pool/d/good", d_sum["good"], self.global_episode)
+            self.tb.add_scalar("pool/d/hard", d_sum["hard"], self.global_episode)
+            self.tb.add_scalar("pool/d/easy", d_sum["easy"], self.global_episode)
+
+            self.tb.add_scalar("pool/d_minus_1/buffer", dm1_sum["buffer"], self.global_episode)
+            self.tb.add_scalar("pool/d_minus_1/good", dm1_sum["good"], self.global_episode)
+            self.tb.add_scalar("pool/d_minus_1/hard", dm1_sum["hard"], self.global_episode)
+            self.tb.add_scalar("pool/d_minus_1/easy", dm1_sum["easy"], self.global_episode)
+
+            self.tb.flush()
+            self.global_episode += 1
+
+        return reward, done, info
+
+    def close(self):
+        self.env.close()
+        self.tb.close()
+
+    def get_obs(self):
+        return self.env.get_obs()
+
+    def get_state(self):
+        return self.env.get_state()
+
+    def get_avail_actions(self):
+        return self.env.get_avail_actions()
+
+    def get_env_info(self):
+        return self.env.get_env_info()
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
 
 
 class Robocup2dEnv:
-
     def __init__(self, cfg="robocup.yaml", **env_args):
-
         self.log = get_env_logger("robocup_env")
         self.config = EnvConfig(load_env_args(cfg, env_args))
 
@@ -35,7 +123,7 @@ class Robocup2dEnv:
             coach_shm_id=self.runtime.coach_shm_id,
             trainer_shm_id=self.runtime.trainer_shm_id,
             player_shm_ids=self.runtime.player_shm_ids,
-            config = self.config,
+            config=self.config,
             log=self.log,
         )
 
@@ -51,10 +139,10 @@ class Robocup2dEnv:
         self.score = [0, 0]
         self._closed = False
         self.episode_limit = self.config.episode_limit
+
         print("self.config.curriculum", self.config.curriculum)
 
     def get_avail_actions(self):
-
         if self.done and self.last_avail_actions is not None:
             return self.last_avail_actions
 
@@ -63,7 +151,7 @@ class Robocup2dEnv:
 
     def reset(self):
         self.turn_count += 1
-        self.log.info(f"Turn {self.turn_count}, Score={self.score}")
+
         if self._need_restart or (not self.runtime.has_live_procs()):
             self._need_restart = False
             self.agents.clear_all_shm_bufs()
@@ -81,26 +169,36 @@ class Robocup2dEnv:
         if not self.agents.wait_all_ready():
             raise P.common.ShmProtocolError("Not READY Before Reset!!")
 
+        print(
+            f"[RESET] turn={self.turn_count}, score={self.score}, cycle={self.agents.coach.cycle()}",
+            flush=True
+        )
+
         if self.config.curriculum:
-                self.agents.set_custom()
+            self.agents.set_custom()
         else:
             if self.turn_count > 1 and int(goal) == 0:
-                    self.agents.set_default()
+                self.agents.set_default()
 
         self.agents.coach.clear_goal_flag()
 
-    def step(self, actions):
+        return {
+            "turn_count": self.turn_count,
+            "score_left": self.score[0],
+            "score_right": self.score[1],
+        }
+    
 
+    def step(self, actions):
         self.episode_steps += 1
 
         if isinstance(actions, torch.Tensor):
             actions = actions.detach().cpu().numpy()
 
-        actions = np.asarray(actions)
- 
         self.agents.trainer.noop()
         self.agents.write_actions(actions)
         self._need_restart = not self.agents.wait_all_ready()
+
         timeout = (self.episode_steps >= self.episode_limit)
         goal = self.agents.coach.goal()
         reward = 0.0
@@ -122,11 +220,9 @@ class Robocup2dEnv:
             "lose": int(reward < 0),
             "timeout": int(timeout),
         }
-
         return float(reward), bool(self.done), info
-    
-    def get_obs(self):
 
+    def get_obs(self):
         if self.done and self.last_obs is not None:
             return self.last_obs
 
@@ -136,6 +232,7 @@ class Robocup2dEnv:
     def get_state(self):
         if self.done and self.last_state is not None:
             return self.last_state
+
         state = self.agents.state(norm=True)
         self.last_state = state.copy()
         return self.last_state

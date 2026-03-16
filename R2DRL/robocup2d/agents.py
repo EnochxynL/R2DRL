@@ -26,43 +26,13 @@ class Agents:
         self.trainer_shm_id = trainer_shm_id
         self.player_shm_ids = dict(player_shm_ids)
         self.agent_mask = np.ones(self.config.n1, dtype=bool)
+        self.current_mask_n = self.config.n1
+
         self.DEFAULT_BALL =  (0.0, 0.0, 0.0, 0.0)
-        self.DEFAULT_LEFT_PLAYERS = [
-            (-50.0,   0.0,   0.0, 0.0, 0.0),   # GK
-
-            (-35.0, -18.0,   0.0, 0.0, 0.0),   # LB
-            (-35.0,  -6.0,   0.0, 0.0, 0.0),   # LCB
-            (-35.0,   6.0,   0.0, 0.0, 0.0),   # RCB
-            (-35.0,  18.0,   0.0, 0.0, 0.0),   # RB
-
-            (-20.0, -20.0,   0.0, 0.0, 0.0),   # LM
-            (-20.0,  -7.0,   0.0, 0.0, 0.0),   # LCM
-            (-20.0,   7.0,   0.0, 0.0, 0.0),   # RCM
-            (-20.0,  20.0,   0.0, 0.0, 0.0),   # RM
-
-            (-5.0,   -8.0,   0.0, 0.0, 0.0),   # ST1
-            (-5.0,    8.0,   0.0, 0.0, 0.0),   # ST2
-        ]        
-        self.DEFAULT_RIGHT_PLAYERS = [
-            ( 50.0,   0.0, 180.0, 0.0, 0.0),   # GK
-
-            ( 35.0, -18.0, 180.0, 0.0, 0.0),
-            ( 35.0,  -6.0, 180.0, 0.0, 0.0),
-            ( 35.0,   6.0, 180.0, 0.0, 0.0),
-            ( 35.0,  18.0, 180.0, 0.0, 0.0),
-
-            ( 20.0, -20.0, 180.0, 0.0, 0.0),
-            ( 20.0,  -7.0, 180.0, 0.0, 0.0),
-            ( 20.0,   7.0, 180.0, 0.0, 0.0),
-            ( 20.0,  20.0, 180.0, 0.0, 0.0),
-
-            (  5.0,  -8.0, 180.0, 0.0, 0.0),
-            (  5.0,   8.0, 180.0, 0.0, 0.0),
-        ]
-        self.DEFAULT_BODY_ANGLES = np.array(
-            [0.0]*11 + [180.0]*11,
-            dtype=np.float32
-        )        
+        self.DEFAULT_LEFT_PLAYERS: Sequence[Tuple[float, float, float, float, float]] =  [(-49.4, 0.0, 91.653, 0.0, 0.0), (-15.1283, -4.5671, 16.782, 0.0065, 0.0017), (-16.162, 3.3026, -11.42, 0.0003, 0.0), (-10.5396, -14.8081, 45.641, 0.3438, -0.1142), (-11.6838, 13.1449, -48.203, 0.0615, 0.0175), (-9.6667, 0.05, 0.187, 1.0, 0.0032), (-3.4658, -4.1658, 71.133, 0.319, 0.9212), (-2.6538, 6.4602, 4.786, 0.9367, 0.0785), (-2.4045, -18.7443, -34.77, 0.8215, -0.5702), (-3.8442, 19.2776, 43.659, 0.7235, 0.6903), (-4.202, 0.0046, -1.803, 0.1202, -0.0022)]
+        self.DEFAULT_RIGHT_PLAYERS: Sequence[Tuple[float, float, float, float, float]] =  [(49.7789, 0.0261, -88.469, 0.0, 0.0), (12.2884, 5.0, -67.727, -0.0035, 0.0), (12.2555, -5.0, 67.876, -0.011, 0.0), (11.1898, 15.5762, -36.079, -0.0592, 0.024), (11.6398, -14.0389, -160.873, -0.0245, -0.0075), (12.0492, 0.4159, -87.745, -0.0255, 0.0007), (7.9027, 8.0888, -43.974, 0.0, 0.0), (8.0057, -8.2308, 43.315, 0.0, 0.0), (2.142, 11.7958, -9.925, -0.0103, 0.0015), (2.4851, -12.012, 11.958, -0.0082, -0.0013), (9.1964, 4.717, -60.697, -0.002, 0.0035)]
+        self.DEFAULT_BODY_ANGLES =  [91.653, 16.782, -11.42, 45.641, -48.203, 0.187, 71.133, 4.786, -34.77, 43.659, -1.803, -88.469, -67.727, 67.876, -36.079, -160.873, -87.745, -43.974, 43.315, -9.925, 11.958, -60.697]
+        
         self.CUSTOM_BALL =  (-13.1491, 19.7303, 0.4673, 0.561)
         self.CUSTOM_LEFT_PLAYERS: Sequence[Tuple[float, float, float, float, float]] =  [(-49.8471, 5.9114, 90.356, 0.0, 0.0), (-23.1647, 3.9302, 1.776, 0.633, 0.0055), (-28.0549, 13.5735, 10.179, 0.9778, 0.1767), (-23.6264, -7.5945, -10.685, 0.9828, -0.1855), (-29.2598, 20.0184, 25.46, 0.1445, 0.0687), (-21.7763, 9.0218, 25.515, 0.87, 0.4077), (-17.4081, -4.1642, -10.551, 0.977, -0.1805), (-18.63, 18.1475, 2.413, 0.9928, 0.0432), (-7.6974, -18.9974, -18.357, 0.0057, -0.002), (-14.6238, 18.5795, 49.841, 0.557, 0.6262), (-1.8707, 8.3827, 12.983, 0.23, 0.1507)]
         self.CUSTOM_RIGHT_PLAYERS: Sequence[Tuple[float, float, float, float, float]] =  [(49.7789, 0.0, 90.607, 0.0, 0.0), (7.2389, 14.1914, 165.824, 0.0735, -0.0617), (5.6635, -0.2856, 136.878, 0.1797, 0.2612), (0.7673, 24.3103, 5.875, 0.5982, 0.0612), (-1.1262, -12.1448, 85.99, 0.2405, 0.019), (-5.0331, 9.6253, 48.578, 0.625, 0.4938), (-17.194, 18.044, 7.491, 0.985, 0.1307), (-17.451, -2.6793, 53.843, 0.5495, 0.6667), (-27.949, 26.1856, 3.103, 0.749, 0.0835), (-26.6065, -17.2931, -31.572, 0.852, -0.5235), (-24.2801, 13.6549, 12.76, 0.9752, 0.2208)]
@@ -245,7 +215,7 @@ class Agents:
 
     def wait_all_ready(
         self,
-        timeout: float = 36000.0,
+        timeout: float = 3600.0,
         poll: float = 0.0005,
         stuck_window: float = 10.0,
         rescue_cooldown: float = 0.5,
@@ -348,6 +318,19 @@ class Agents:
         self.wait_all_ready()
 
     def set_custom(self) -> None:
+        CUSTOM_LEFT_PLAYERS_ZERO = self.zero_player_velocities(self.CUSTOM_LEFT_PLAYERS)
+        CUSTOM_RIGHT_PLAYERS_ZERO = self.zero_player_velocities(self.CUSTOM_RIGHT_PLAYERS)
+        for i in range(5):
+            self.trainer.reset_players_and_ball(
+                self.CUSTOM_BALL,
+                CUSTOM_LEFT_PLAYERS_ZERO,
+                CUSTOM_RIGHT_PLAYERS_ZERO,
+            )
+            self.write_all_body_targets(self.CUSTOM_BODY_ANGLES)
+            is_hybrid = (self.config.team1 == "hybrid")
+            for p in self.player_list:
+                p.take_empty_action(is_hybrid=is_hybrid)
+            self.wait_all_ready()
 
         self.trainer.reset_players_and_ball(
             self.CUSTOM_BALL,
@@ -422,13 +405,9 @@ class Agents:
 
         return out
 
-    def set_agent_mask(self, n: int) -> np.ndarray:
-        n1 = int(self.config.n1)
+    def set_agent_mask(self) -> np.ndarray:
 
-        if n < 0:
-            raise ValueError(f"n must be >= 0, got {n}")
-
-        n = min(int(n), n1)
+        n = min(int(self.current_mask_n), self.config.n1)
 
         state = self.state(norm=False)
 
@@ -436,7 +415,7 @@ class Agents:
         by = float(state[1])
 
         players = state[4:].reshape(22, 6)
-        team1_players = players[:n1]
+        team1_players = players[:self.config.n1]
 
         px = team1_players[:, 0]
         py = team1_players[:, 1]
@@ -448,3 +427,42 @@ class Agents:
         self.agent_mask[nearest_idx] = True
 
         return self.agent_mask.copy()
+    
+    def set_mask_n(self, n: int) -> int:
+        """
+        Configure how many team1 agents should be activated
+        when set_agent_mask() is called.
+
+        Returns:
+            sanitized n
+        """
+        n1 = int(self.config.n1)
+
+        if n < 0:
+            raise ValueError(f"n must be >= 0, got {n}")
+
+        n = min(int(n), n1)
+        self.current_mask_n = n
+        return self.current_mask_n
+    
+    def configure_reset_state(
+        self,
+        *,
+        ball: np.ndarray,
+        left_players: np.ndarray,
+        right_players: np.ndarray,
+        body_angles: np.ndarray,
+    ) -> None:
+
+        ball = ball.astype(np.float32, copy=False)
+        left_players = left_players.astype(np.float32, copy=False)
+        right_players = right_players.astype(np.float32, copy=False)
+        body_angles = body_angles.astype(np.float32, copy=False)
+
+        self.CUSTOM_BALL = tuple(ball.tolist())
+        self.CUSTOM_LEFT_PLAYERS = [tuple(row) for row in left_players.tolist()]
+        self.CUSTOM_RIGHT_PLAYERS = [tuple(row) for row in right_players.tolist()]
+        self.CUSTOM_BODY_ANGLES = body_angles.copy()
+
+    def zero_player_velocities(self, players):
+        return [(x, y, body, 0.0, 0.0) for x, y, body, vx, vy in players]

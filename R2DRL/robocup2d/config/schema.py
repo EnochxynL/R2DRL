@@ -24,6 +24,15 @@ class EnvConfig:
             "trainer_ready_timeout_ms",
             "ports_wait_timeout", "server_wait_seconds",
             "curriculum",
+
+            # curriculum parameters
+            "depth_step",
+            "init_n",
+
+            # tensorboard
+            "tb",
+            "tb_log_dir",
+
             "lib_paths",
         ]
 
@@ -47,6 +56,7 @@ class EnvConfig:
 
         if self.team1 not in ("base", "hybrid"):
             raise ValueError(f"Unknown team1 type: {self.team1}")
+
         self.is_hybrid = (self.team1 == "hybrid")
 
         # ---------- Episode ----------
@@ -101,10 +111,27 @@ class EnvConfig:
         # ---------- Curriculum ----------
         self.curriculum: bool = self._require_bool(args, "curriculum")
 
+        self.depth_step: int = self._require_int(args, "depth_step")
+        self.init_n: int = self._require_int(args, "init_n")
+
+        if self.depth_step <= 0:
+            raise ValueError("depth_step must be >= 1")
+
+        if not (1 <= self.init_n <= self.n1):
+            raise ValueError(
+                f"init_n must be between 1 and {self.n1}, got {self.init_n}"
+            )
+
+        # ---------- TensorBoard ----------
+        self.tb: bool = self._require_bool(args, "tb")
+        self.tb_log_dir: str = self._require_str(args, "tb_log_dir")
+
         # ---------- Lib paths ----------
         lib_paths = args["lib_paths"]
+
         if not isinstance(lib_paths, list):
             raise TypeError("'lib_paths' must be a list of strings")
+
         self.lib_paths: List[str] = [str(p) for p in lib_paths]
 
     # =============================

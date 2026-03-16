@@ -1,3 +1,3 @@
-from .env import Robocup2dEnv
+from .env import Robocup2dEnv, R2DRL
 
-__all__ = ["Robocup2dEnv"]
+__all__ = ["Robocup2dEnv", "R2DRL"]

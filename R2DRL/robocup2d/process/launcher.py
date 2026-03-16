@@ -108,6 +108,7 @@ def launch_server(
         f"--server::game_log_dir={rcg_dir}",
         f"--server::text_log_dir={rcg_dir}",
         "--server::text_logging=false",
+        "--server::game_logging=false",
 
         # stamina 不影响
         "--server::stamina_capacity=-1",
