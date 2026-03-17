@@ -26,7 +26,6 @@ class EnvConfig:
             "curriculum",
 
             # curriculum parameters
-            "depth_step",
             "init_n",
 
             # tensorboard
@@ -111,11 +110,7 @@ class EnvConfig:
         # ---------- Curriculum ----------
         self.curriculum: bool = self._require_bool(args, "curriculum")
 
-        self.depth_step: int = self._require_int(args, "depth_step")
         self.init_n: int = self._require_int(args, "init_n")
-
-        if self.depth_step <= 0:
-            raise ValueError("depth_step must be >= 1")
 
         if not (1 <= self.init_n <= self.n1):
             raise ValueError(

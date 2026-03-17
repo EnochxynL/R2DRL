@@ -11,7 +11,6 @@ from .agents import Agents
 from .curriculum import CurriculumController
 from .tb_logger import TBLogger
 
-
 class R2DRL:
     def __init__(self, cfg="robocup.yaml", **env_args):
         self.env = Robocup2dEnv(cfg=cfg, **env_args)
@@ -23,28 +22,30 @@ class R2DRL:
             log_dir=tb_log_dir,
             enabled=use_tb,
         )
-
         self.controller = CurriculumController(
-            depth_step=self.env.config.depth_step,
             init_n=self.env.config.init_n,
         )
 
         self.global_episode = 0
+        self.test_mode = False
+        self.episode_key = None
 
     def reset(self, *args, **kwargs):
-        key = self.controller.epsilon_generate_key()
-
-        self.controller.apply_state_and_n_by_key(
-            self.env,
-            key=key
-        )
+        if self.test_mode:
+            self.env.test_mode = True
+            self.episode_key = None
+        else:
+            self.env.test_mode = False
+            key = self.controller.generate_key()
+            
+            self.episode_key = key
+            self.controller.apply_state_and_n_by_key(
+                self.env,
+                key=key
+            )
 
         info = self.env.reset(*args, **kwargs)
         self.env.agents.set_agent_mask()
-
-        # 只记录当前 episode 对应的 depth / n
-        self.tb.add_scalar("curriculum/current_depth", key[0], self.global_episode)
-        self.tb.add_scalar("curriculum/current_n", key[1], self.global_episode)
 
         return info
 
@@ -53,30 +54,15 @@ class R2DRL:
         self.env.agents.set_agent_mask()
 
         if done:
-            key = self.controller.current_episode_key
+            if not self.test_mode:
+                key = self.episode_key
+                self.controller.update_key_stats(key, reward)
+                frontier_stats = self.controller.get_frontier_stats()
+                for name, value in frontier_stats.items():
+                    self.tb.add_scalar(f"curriculum/{name}", value, self.global_episode)
 
-            self.controller.update_key_return(key, reward)
-            level = self.controller.classify_key(key)
-            self.controller.update_key_pool(key, level)
-            self.controller.maybe_advance_curriculum()
-
-            d_sum = self.controller._pool_summary(self.controller.d_pool)
-            dm1_sum = self.controller._pool_summary(self.controller.d_minus_1_pool)
-
-            # 只记录你关心的指标
-            self.tb.add_scalar("pool/d/dm1_mean", self.controller.dm1_mean, self.global_episode)
-            self.tb.add_scalar("pool/d/buffer", d_sum["buffer"], self.global_episode)
-            self.tb.add_scalar("pool/d/good", d_sum["good"], self.global_episode)
-            self.tb.add_scalar("pool/d/hard", d_sum["hard"], self.global_episode)
-            self.tb.add_scalar("pool/d/easy", d_sum["easy"], self.global_episode)
-
-            self.tb.add_scalar("pool/d_minus_1/buffer", dm1_sum["buffer"], self.global_episode)
-            self.tb.add_scalar("pool/d_minus_1/good", dm1_sum["good"], self.global_episode)
-            self.tb.add_scalar("pool/d_minus_1/hard", dm1_sum["hard"], self.global_episode)
-            self.tb.add_scalar("pool/d_minus_1/easy", dm1_sum["easy"], self.global_episode)
-
-            self.tb.flush()
-            self.global_episode += 1
+                self.tb.flush()
+                self.global_episode += 1
 
         return reward, done, info
 
@@ -139,6 +125,7 @@ class Robocup2dEnv:
         self.score = [0, 0]
         self._closed = False
         self.episode_limit = self.config.episode_limit
+        self.test_mode = False
 
         print("self.config.curriculum", self.config.curriculum)
 
@@ -175,7 +162,10 @@ class Robocup2dEnv:
         )
 
         if self.config.curriculum:
-            self.agents.set_custom()
+            if self.test_mode:
+                self.agents.set_default()
+            else:
+                self.agents.set_custom()
         else:
             if self.turn_count > 1 and int(goal) == 0:
                 self.agents.set_default()
