@@ -121,6 +121,11 @@ class EnvConfig:
         self.tb: bool = self._require_bool(args, "tb")
         self.tb_log_dir: str = self._require_str(args, "tb_log_dir")
 
+        # ---------- Multi Env ----------
+        self.n_envs: int = int(args.get("n_envs", 1))
+        if self.n_envs < 1:
+            raise ValueError(f"n_envs must be >= 1, got {self.n_envs}")
+
         # ---------- Lib paths ----------
         lib_paths = args["lib_paths"]
 

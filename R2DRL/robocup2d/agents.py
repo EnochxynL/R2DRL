@@ -445,7 +445,7 @@ class Agents:
         self.current_mask_n = n
         return self.current_mask_n
     
-    def configure_reset_state(
+    def configure_reset_start(
         self,
         *,
         ball: np.ndarray,

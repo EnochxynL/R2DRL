@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import os
+from time import time
 import torch
+import numpy as np
+import copy
+import time
 
 from .protocols import P
 from .logging_utils import get_env_logger
@@ -11,8 +15,66 @@ from .agents import Agents
 from .curriculum import CurriculumController
 from .tb_logger import TBLogger
 
+
+class ParallelR2DRL:
+    def __init__(self, cfg="r2drl.yaml", **env_args):
+        self.env = Robocup2dEnv(cfg=cfg, **env_args)
+        self.test_mode = False
+
+    def set_test_mode(self, test_mode: bool):
+        self.test_mode = bool(test_mode)
+        return True
+    
+    def reset(self, *args, **kwargs):
+
+        if self.test_mode:
+            self.env.test_mode = True
+        else:
+            self.env.test_mode = False
+        
+        info = self.env.reset(*args, **kwargs)
+        self.env.agents.set_agent_mask()
+
+        return info
+    def set_start_and_n(self,start, n_control):
+        self.env.agents.set_mask_n(n_control)
+        self.env.agents.configure_reset_start(
+            ball=start["ball"],
+            left_players=start["left_players"],
+            right_players=start["right_players"],
+            body_angles=start["body_angles"],
+        )
+        return True
+
+    def step(self, actions):
+        reward, done, info = self.env.step(actions)
+        self.env.agents.set_agent_mask()
+        return reward, done, info
+    
+    def get_stats(self):
+        return {}
+    
+    def close(self):
+        self.env.close()
+
+    def get_obs(self):
+        return self.env.get_obs()
+
+    def get_state(self):
+        return self.env.get_state()
+
+    def get_avail_actions(self):
+        return self.env.get_avail_actions()
+
+    def get_env_info(self):
+        return self.env.get_env_info()
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
+    
+
 class R2DRL:
-    def __init__(self, cfg="robocup.yaml", **env_args):
+    def __init__(self, cfg="r2drl.yaml", **env_args):
         self.env = Robocup2dEnv(cfg=cfg, **env_args)
 
         use_tb = self.env.config.tb
@@ -29,8 +91,10 @@ class R2DRL:
         self.global_episode = 0
         self.test_mode = False
         self.episode_key = None
+        self.test_returns = []
 
     def reset(self, *args, **kwargs):
+        self.flush_test_returns_to_tb()
         if self.test_mode:
             self.env.test_mode = True
             self.episode_key = None
@@ -39,7 +103,7 @@ class R2DRL:
             key = self.controller.generate_key()
             
             self.episode_key = key
-            self.controller.apply_state_and_n_by_key(
+            self.controller.apply_start_and_n_by_key(
                 self.env,
                 key=key
             )
@@ -54,9 +118,13 @@ class R2DRL:
         self.env.agents.set_agent_mask()
 
         if done:
-            if not self.test_mode:
+            if self.test_mode:
+                self.test_returns.append(float(reward))
+            else:
                 key = self.episode_key
-                self.controller.update_key_stats(key, reward)
+                if key is not None:
+                    self.controller.update_key_stats(key, reward)
+
                 frontier_stats = self.controller.get_frontier_stats()
                 for name, value in frontier_stats.items():
                     self.tb.add_scalar(f"curriculum/{name}", value, self.global_episode)
@@ -84,7 +152,13 @@ class R2DRL:
 
     def __getattr__(self, name):
         return getattr(self.env, name)
-
+    
+    def flush_test_returns_to_tb(self):
+        if (not self.test_mode) and len(self.test_returns) > 0:
+            mean_return = float(np.mean(self.test_returns))
+            self.tb.add_scalar("test/return_mean", mean_return, self.global_episode)
+            self.tb.flush()
+            self.test_returns.clear()
 
 class Robocup2dEnv:
     def __init__(self, cfg="robocup.yaml", **env_args):
@@ -240,5 +314,5 @@ class Robocup2dEnv:
             "n_actions": int(self.agents.n_actions),
             "state_shape": int(P.coach.COACH_STATE_FLOAT),
             "obs_shape": int(P.player.STATE_NUM),
-            "episode_limit": int(self.episode_limit),
+            "episode_limit": int(self.config.episode_limit),
         }

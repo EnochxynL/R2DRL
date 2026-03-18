@@ -54,3 +54,5 @@ env_args:
 
   depth_step: 2        # 每次 curriculum depth 减少的步长
   init_n: 1            # 初始受控球员数量
+
+  n_envs: 4
