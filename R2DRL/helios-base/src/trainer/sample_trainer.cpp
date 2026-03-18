@@ -305,9 +305,9 @@ void SampleTrainer::resetFromPython_()
 
     doChangeMode(PM_PlayOn);
 
-    std::cerr << "[trainer][resetFromPy] done. "
-              << "nL=" << nL << " nR=" << nR
-              << " ball=(" << bx << "," << by << "," << bvx << "," << bvy << ")\n";
+    // std::cerr << "[trainer][resetFromPy] done. "
+    //           << "nL=" << nL << " nR=" << nR
+    //           << " ball=(" << bx << "," << by << "," << bvx << "," << bvy << ")\n";
 }
 
 
@@ -319,29 +319,29 @@ void SampleTrainer::resetFromPython_()
  */void
 SampleTrainer::actionImpl()
 {
-    std::cerr << "\n================ TRAINER ACTION =================\n";
-    std::cerr << "[trainer] cycle=" << world().time().cycle()
-              << " playmode=" << world().gameMode().type()
-              << " teamL=" << world().teamNameLeft()
-              << " teamR=" << world().teamNameRight()
-              << "\n";
+    // std::cerr << "\n================ TRAINER ACTION =================\n";
+    // std::cerr << "[trainer] cycle=" << world().time().cycle()
+    //           << " playmode=" << world().gameMode().type()
+    //           << " teamL=" << world().teamNameLeft()
+    //           << " teamR=" << world().teamNameRight()
+    //           << "\n";
 
-    std::cerr << "[trainer] shm_ready_=" << shm_ready_
-              << " shm_ptr=" << (void*)shm_
-              << "\n";
+    // std::cerr << "[trainer] shm_ready_=" << shm_ready_
+    //           << " shm_ptr=" << (void*)shm_
+    //           << "\n";
 
     if (shm_) {
         auto [a_dbg, b_dbg] = trainer_flags(shm_);
-        std::cerr << "[trainer] flags BEFORE logic: A="
-                  << int(a_dbg) << " B=" << int(b_dbg) << "\n";
+        // std::cerr << "[trainer] flags BEFORE logic: A="
+        //           << int(a_dbg) << " B=" << int(b_dbg) << "\n";
     }
-    std::cerr << "=================================================\n";
+    // std::cerr << "=================================================\n";
 
     // 1) 队名未准备好：这里不视为状态机错误，正常 return
     if (world().teamNameLeft().empty())
     {
         doTeamNames();
-        std::cerr << "[trainer] teamNameLeft empty -> doTeamNames()\n";
+        // std::cerr << "[trainer] teamNameLeft empty -> doTeamNames()\n";
         if (world().teamNameLeft().empty()) {
             std::cerr << "[trainer] doTeamNames() but still empty, return.\n";
             return;
@@ -356,13 +356,13 @@ SampleTrainer::actionImpl()
 
     // 3) 非 PlayOn：按你的设计，这是正常情况，直接 return
     if (world().gameMode().type() != GameMode::PlayOn) {
-        std::cerr << "[trainer] not PlayOn (pm="
-                  << world().gameMode().type()
-                  << "), skip IPC.\n";
+        // std::cerr << "[trainer] not PlayOn (pm="
+        //           << world().gameMode().type()
+        //           << "), skip IPC.\n";
         return;
     }
 
-    std::cerr << "[trainer] PlayOn mode, enter IPC.\n";
+    // std::cerr << "[trainer] PlayOn mode, enter IPC.\n";
 
     auto throw_state_error =
         [this](const std::string & msg,
@@ -386,8 +386,8 @@ SampleTrainer::actionImpl()
 
     // 4) 读取 flags
     auto [a, b] = trainer_flags(shm_);
-    std::cerr << "[trainer][IPC] entry flags A=" << int(a)
-              << " B=" << int(b) << "\n";
+    // std::cerr << "[trainer][IPC] entry flags A=" << int(a)
+    //           << " B=" << int(b) << "\n";
 
     // 5) 状态机入口只允许 00 / 11 / 01 / 10
     //    其中：
@@ -396,15 +396,15 @@ SampleTrainer::actionImpl()
     //      10      -> 本轮直接消费 request
     if ((a == 0 && b == 0) || (a == 1 && b == 1)) {
         trainer_set_ready(shm_);  // -> 01
-        std::cerr << "[trainer][IPC] set READY -> (0,1)\n";
+        // std::cerr << "[trainer][IPC] set READY -> (0,1)\n";
         a = 0;
         b = 1;
     }
     else if (a == 0 && b == 1) {
-        std::cerr << "[trainer][IPC] already READY -> (0,1)\n";
+        // std::cerr << "[trainer][IPC] already READY -> (0,1)\n";
     }
     else if (a == 1 && b == 0) {
-        std::cerr << "[trainer][IPC] already REQUEST -> (1,0)\n";
+        // std::cerr << "[trainer][IPC] already REQUEST -> (1,0)\n";
     }
     else {
         throw_state_error("invalid entry flags", int(a), int(b));
@@ -412,7 +412,7 @@ SampleTrainer::actionImpl()
 
     // 6) READY(01): 等 Python 写 REQUEST(10)
     if (a == 0 && b == 1) {
-        std::cerr << "[trainer][IPC] waiting REQUEST(1,0)...\n";
+        // std::cerr << "[trainer][IPC] waiting REQUEST(1,0)...\n";
         if (!wait_trainer_request(shm_)) {
             throw_state_error("wait_trainer_request() timeout while in READY state",
                               int(a), int(b));
@@ -420,8 +420,8 @@ SampleTrainer::actionImpl()
 
         // wait 成功后，理论上共享内存必须已经是 10
         auto [a_after, b_after] = trainer_flags(shm_);
-        std::cerr << "[trainer][IPC] flags after wait A=" << int(a_after)
-                  << " B=" << int(b_after) << "\n";
+        // std::cerr << "[trainer][IPC] flags after wait A=" << int(a_after)
+        //           << " B=" << int(b_after) << "\n";
 
         if (!(a_after == 1 && b_after == 0)) {
             throw_state_error("wait_trainer_request() returned but flags are not REQUEST",
@@ -437,12 +437,12 @@ SampleTrainer::actionImpl()
         trainer_acquire_fence();
 
         const std::int32_t opcode = rd32_(T_OPCODE);
-        std::cerr << "[trainer][IPC] got request opcode=" << opcode << "\n";
+        // std::cerr << "[trainer][IPC] got request opcode=" << opcode << "\n";
 
         exec_opcode_(opcode);
 
         trainer_set_ack11(shm_);
-        std::cerr << "[trainer][IPC] set ACK -> (1,1)\n";
+        // std::cerr << "[trainer][IPC] set ACK -> (1,1)\n";
 
         auto [a_ack, b_ack] = trainer_flags(shm_);
         if (!(a_ack == 1 && b_ack == 1)) {
@@ -555,7 +555,7 @@ SampleTrainer::sampleAction()
 
         doSay( "move player" );
         s_state = 2;
-        std::cout << "trainer: actionImpl init episode." << std::endl;
+        // std::cout << "trainer: actionImpl init episode." << std::endl;
         break;
     case 2:
         ++s_wait_counter;
@@ -576,7 +576,7 @@ SampleTrainer::sampleAction()
                         velocity );
             s_state = 0;
             s_wait_counter = 0;
-            std::cout << "trainer: actionImpl start ball" << std::endl;
+            // std::cout << "trainer: actionImpl start ball" << std::endl;
         }
         break;
 
@@ -615,9 +615,9 @@ SampleTrainer::doSubstitute()
          && world().time().cycle() == 0
          && world().time().stopped() >= 10 )
     {
-        std::cerr << "trainer " << world().time() << " team name = "
-                  << world().teamNameLeft()
-                  << std::endl;
+        // std::cerr << "trainer " << world().time() << " team name = "
+        //           << world().teamNameLeft()
+        //           << std::endl;
 
         if ( ! world().teamNameLeft().empty() )
         {

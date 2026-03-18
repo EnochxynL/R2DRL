@@ -581,12 +581,12 @@ SamplePlayer::actionImpl()
     const int unum = world().self().unum();
     const int cyc = world().time().cycle();
     const int gm  = static_cast<int>(world().gameMode().type());
-    std::cerr << "[HB] pid=" << ::getpid()
-            << " unum=" << unum
-            << " cyc=" << cyc
-            << " gm=" << int(world().gameMode().type())
-            << " mode=" << int(mode_)
-            << "\n";
+    // std::cerr << "[HB] pid=" << ::getpid()
+    //         << " unum=" << unum
+    //         << " cyc=" << cyc
+    //         << " gm=" << int(world().gameMode().type())
+    //         << " mode=" << int(mode_)
+    //         << "\n";
     auto shm_base = [&]() -> uint8_t* {
         return shm_ptr ? static_cast<uint8_t*>(shm_ptr) : nullptr;
     };
@@ -608,33 +608,33 @@ SamplePlayer::actionImpl()
 
     auto cerr_flags = [&](const char* tag) {
         if (!shm_ptr) {
-            std::cerr << "[SHM][" << tag << "] cyc=" << cyc
-                      << " gm=" << gm
-                      << " mode=" << int(mode_)
-                      << " shm_ptr=null"
-                      << " kickable=" << int(world().self().isKickable())
-                      << " frozen=" << int(world().self().isFrozen())
-                      << " goalie=" << int(world().self().goalie())
-                      << "\n";
+            // std::cerr << "[SHM][" << tag << "] cyc=" << cyc
+            //           << " gm=" << gm
+            //           << " mode=" << int(mode_)
+            //           << " shm_ptr=null"
+            //           << " kickable=" << int(world().self().isKickable())
+            //           << " frozen=" << int(world().self().isFrozen())
+            //           << " goalie=" << int(world().self().goalie())
+            //           << "\n";
             return;
         }
         volatile uint8_t* A = nullptr;
         volatile uint8_t* B = nullptr;
         if (!shm_flags(A, B)) {
-            std::cerr << "[SHM][" << tag << "] cyc=" << cyc
-                      << " gm=" << gm
-                      << " mode=" << int(mode_)
-                      << " shm_flags=fail\n";
+            // std::cerr << "[SHM][" << tag << "] cyc=" << cyc
+            //           << " gm=" << gm
+            //           << " mode=" << int(mode_)
+            //           << " shm_flags=fail\n";
             return;
         }
-        std::cerr << "[SHM][" << tag << "] cyc=" << cyc
-                  << " gm=" << gm
-                  << " mode=" << int(mode_)
-                  << " flags=(" << int(*A) << "," << int(*B) << ")"
-                  << " kickable=" << int(world().self().isKickable())
-                  << " frozen=" << int(world().self().isFrozen())
-                  << " goalie=" << int(world().self().goalie())
-                  << "\n";
+        // std::cerr << "[SHM][" << tag << "] cyc=" << cyc
+        //           << " gm=" << gm
+        //           << " mode=" << int(mode_)
+        //           << " flags=(" << int(*A) << "," << int(*B) << ")"
+        //           << " kickable=" << int(world().self().isKickable())
+        //           << " frozen=" << int(world().self().isFrozen())
+        //           << " goalie=" << int(world().self().goalie())
+        //           << "\n";
     };
 
     // only spam around PlayOn entry
@@ -748,7 +748,7 @@ SamplePlayer::actionImpl()
         volatile uint8_t* flag_B = nullptr;
         if (shm_flags(flag_A, flag_B)) {
             shm_set_flags(flag_A, flag_B, 0, 0);
-            std::cerr << "[SHM][NonPlayOn] cyc=" << cyc << " gm=" << gm << " set flags (0,0)\n";
+            // std::cerr << "[SHM][NonPlayOn] cyc=" << cyc << " gm=" << gm << " set flags (0,0)\n";
         }
     }
     runHeliosFrame_();
@@ -1754,10 +1754,10 @@ void SamplePlayer::takeAction(int n) {
             bool can_shoot = isDoShootExecutable();
             if (can_shoot) {
                 doShoot();   // 严格射门，可行时优先
-                std::cout << "doShoot executed: " << can_shoot << std::endl;
+                // std::cout << "doShoot executed: " << can_shoot << std::endl;
             } else {
                 bool fk = doForceKick();  // 如果严格射门条件不满足，就执行强制射门
-                std::cout << "doForceKick executed: " << fk << std::endl;
+                // std::cout << "doForceKick executed: " << fk << std::endl;
             }
             break;
         }
@@ -1877,7 +1877,7 @@ void SamplePlayer::takeAction(int n) {
             while (moment > 180.0)  moment -= 360.0;
             while (moment < -180.0) moment += 360.0;
             
-            std::cout << "[TURN] target=" << target_deg << " current=" << current_body << " moment=" << moment << std::endl;
+            // std::cout << "[TURN] target=" << target_deg << " current=" << current_body << " moment=" << moment << std::endl;
             this->doTurn(moment);
 
             this->setViewAction(new View_Tactical());

@@ -301,7 +301,8 @@ sample_trainer-sample_trainer.o: sample_trainer.cpp \
  /usr/include/linux/close_range.h /usr/include/c++/13/cstring \
  /usr/include/string.h /usr/include/strings.h \
  /usr/include/x86_64-linux-gnu/bits/strings_fortified.h \
- /usr/include/x86_64-linux-gnu/bits/string_fortified.h
+ /usr/include/x86_64-linux-gnu/bits/string_fortified.h \
+ /usr/include/c++/13/sstream /usr/include/c++/13/bits/sstream.tcc
 /usr/include/stdc-predef.h:
 ../../config.h:
 sample_trainer.h:
@@ -671,3 +672,5 @@ sample_trainer.h:
 /usr/include/strings.h:
 /usr/include/x86_64-linux-gnu/bits/strings_fortified.h:
 /usr/include/x86_64-linux-gnu/bits/string_fortified.h:
+/usr/include/c++/13/sstream:
+/usr/include/c++/13/bits/sstream.tcc:
