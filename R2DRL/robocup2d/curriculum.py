@@ -11,6 +11,7 @@ class CurriculumController:
 
         # 取 start state 时的窗口宽度
         self.start_window_size = int(start_window_size)
+        print(f"CurriculumController.start_window_size={self.start_window_size}")
 
         # 统计最近 return 的滑动窗口长度（只针对当前 frontier）
         self.return_window_size = int(return_window_size)
@@ -54,18 +55,49 @@ class CurriculumController:
             "easy": set(),
         }
 
+        # hard 自适应采样参数
+        self.target_hard_ratio = 0.35
+        self.base_hard_prob = 0.20
+        self.hard_prob_gain = 0.80
+        self.min_hard_prob = 0.10
+        self.max_hard_prob = 0.40
+
         self._rebuild_frontier_stats()
 
+    def _compute_adaptive_hard_prob(self):
+        """
+        根据当前 frontier 中 good / hard 的比例，自适应计算 hard 的采样概率。
+        目标：当 hard 堆积过多时，提高 hard 抽样概率，把 hard 压回可接受范围。
+        """
+        g = len(self.frontier_trajs_by_level["good"])
+        h = len(self.frontier_trajs_by_level["hard"])
+
+        if h == 0:
+            return 0.0
+        if g == 0:
+            return self.max_hard_prob
+
+        hard_ratio = h / float(g + h)
+
+        p_hard = (
+            self.base_hard_prob
+            + self.hard_prob_gain * (hard_ratio - self.target_hard_ratio)
+        )
+
+        p_hard = max(self.min_hard_prob, min(self.max_hard_prob, p_hard))
+        return float(p_hard)
+    
     def generate_new_key(self):
         """
         当前 frontier 采样逻辑：
         1. 如果还有 buffer，优先只从 buffer 里抽
-        2. 如果没有 buffer，再从 good / hard 里按 4:1 抽
+        2. 如果没有 buffer，则在 good / hard 中做自适应采样
         3. easy 不参与 new key 采样
         """
         if len(self.trajectories) == 0:
             raise ValueError("no trajectories loaded")
 
+        # 1) 只要还有 buffer，就只从 buffer 里抽
         if self.frontier_trajs_by_level["buffer"]:
             traj_id = min(self.frontier_trajs_by_level["buffer"])
             frame_idx = int(self.traj_progress[traj_id])
@@ -74,16 +106,29 @@ class CurriculumController:
         good_trajs = list(self.frontier_trajs_by_level["good"])
         hard_trajs = list(self.frontier_trajs_by_level["hard"])
 
-        weighted_trajs = []
-        weighted_trajs.extend(good_trajs * 4)
-        weighted_trajs.extend(hard_trajs)
+        if not good_trajs and not hard_trajs:
+            return None
 
-        if weighted_trajs:
-            traj_id = int(random.choice(weighted_trajs))
+        if not good_trajs:
+            traj_id = int(random.choice(hard_trajs))
             frame_idx = int(self.traj_progress[traj_id])
             return (traj_id, frame_idx, self.current_n)
 
-        return None
+        if not hard_trajs:
+            traj_id = int(random.choice(good_trajs))
+            frame_idx = int(self.traj_progress[traj_id])
+            return (traj_id, frame_idx, self.current_n)
+
+        # 2) hard 比例自适应控制
+        p_hard = self._compute_adaptive_hard_prob()
+
+        if random.random() < p_hard:
+            traj_id = int(random.choice(hard_trajs))
+        else:
+            traj_id = int(random.choice(good_trajs))
+
+        frame_idx = int(self.traj_progress[traj_id])
+        return (traj_id, frame_idx, self.current_n)
 
     def generate_old_key(self):
         """
@@ -106,7 +151,7 @@ class CurriculumController:
 
         return (traj_id, frame_idx, self.current_n)
 
-    def generate_key(self, p_new=0.2):
+    def generate_key(self, p_new=0.8):
         """
         按给定概率混合采样:
         - p_new 概率采样 new key
