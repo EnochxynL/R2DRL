@@ -5,25 +5,56 @@ from collections import deque
 
 
 class CurriculumController:
-    def __init__(self, init_n=1,window_size=1):
+    def __init__(self, init_n=1, start_window_size=3, return_window_size=5):
 
         self.current_n = init_n
-        self.window_size = int(window_size)
+
+        # 取 start state 时的窗口宽度
+        self.start_window_size = int(start_window_size)
+
+        # 统计最近 return 的滑动窗口长度（只针对当前 frontier）
+        self.return_window_size = int(return_window_size)
+
         self.trajectories, self.traj_progress = self.load_trajectory_array("./trajectories.npz")
         self.traj_max_frame = self.traj_progress.copy()
         self.traj_max_progress_sum = float(np.sum(self.traj_max_frame))
         self.traj_curr_progress_sum = self.traj_max_progress_sum
 
-        self.window_size = 5
         self.max_n = 11
-        self.key_stats = {}
         self.step = 0
 
-        # 历史池（所有已创建 key）的全局分类计数
-        self.hist_buffer_count = 0
-        self.hist_good_count = 0
-        self.hist_hard_count = 0
-        self.hist_easy_count = 0
+        self.num_traj = len(self.trajectories)
+
+        # 当前仍可用于课程/old采样的轨迹（traj_progress > 0）
+        self.active_traj_ids = set(np.where(self.traj_progress > 0)[0].astype(int).tolist())
+
+        # ============================================================
+        # 只维护“每条轨迹当前 frontier”的统计
+        # ============================================================
+        self.frontier_returns_by_traj = [
+            deque(maxlen=self.return_window_size) for _ in range(self.num_traj)
+        ]
+        self.frontier_visits_by_traj = np.zeros(self.num_traj, dtype=np.int32)
+        self.frontier_mean_return_by_traj = np.zeros(self.num_traj, dtype=np.float32)
+        self.frontier_level_by_traj = ["buffer" for _ in range(self.num_traj)]
+
+        # 当前 frontier 的分类计数
+        self.frontier_counts = {
+            "buffer": 0,
+            "good": 0,
+            "hard": 0,
+            "easy": 0,
+        }
+
+        # 当前 frontier 按 level 分组的轨迹集合
+        self.frontier_trajs_by_level = {
+            "buffer": set(),
+            "good": set(),
+            "hard": set(),
+            "easy": set(),
+        }
+
+        self._rebuild_frontier_stats()
 
     def generate_new_key(self):
         """
@@ -35,42 +66,23 @@ class CurriculumController:
         if len(self.trajectories) == 0:
             raise ValueError("no trajectories loaded")
 
-        buffer_keys = []
-        good_keys = []
-        hard_keys = []
-
-        valid_traj_ids = np.where(self.traj_progress > 0)[0]
-
-        for traj_id in valid_traj_ids:
+        if self.frontier_trajs_by_level["buffer"]:
+            traj_id = min(self.frontier_trajs_by_level["buffer"])
             frame_idx = int(self.traj_progress[traj_id])
-            key = (int(traj_id), frame_idx, self.current_n)
+            return (traj_id, frame_idx, self.current_n)
 
-            entry = self._ensure_key_stats(key)
-            level = entry["level"]
+        good_trajs = list(self.frontier_trajs_by_level["good"])
+        hard_trajs = list(self.frontier_trajs_by_level["hard"])
 
+        weighted_trajs = []
+        weighted_trajs.extend(good_trajs * 4)
+        weighted_trajs.extend(hard_trajs)
 
-            if level == "buffer":
-                buffer_keys.append(key)
-            elif level == "good":
-                good_keys.append(key)
-            elif level == "hard":
-                hard_keys.append(key)
-            # easy 不加入
+        if weighted_trajs:
+            traj_id = int(random.choice(weighted_trajs))
+            frame_idx = int(self.traj_progress[traj_id])
+            return (traj_id, frame_idx, self.current_n)
 
-        # 1) 只要还有 buffer，就只从 buffer 抽
-        if len(buffer_keys) > 0:
-            buffer_keys.sort(key=lambda x: x[0])  # x[0] = traj_id
-            return buffer_keys[0]
-
-        # 2) 没有 buffer 时，从 good / hard 按 4:1 抽
-        weighted_keys = []
-        weighted_keys.extend(good_keys * 4)
-        weighted_keys.extend(hard_keys * 1)
-
-        if len(weighted_keys) > 0:
-            return random.choice(weighted_keys)
-
-        # 3) 都没有则返回 None
         return None
 
     def generate_old_key(self):
@@ -78,21 +90,14 @@ class CurriculumController:
         先随机选一条当前进度 > 0 的轨迹，
         再从该轨迹区间 [当前进度, 起始最大帧] 中随机抽一个 frame，
         生成 old key。
-
-        返回:
-            key = (traj_id, frame_idx, n_control)
-
-        如果没有可用轨迹，则返回 None
         """
         if len(self.trajectories) == 0:
             raise ValueError("no trajectories loaded")
 
-        valid_traj_ids = np.where(self.traj_progress > 0)[0]
-
-        if len(valid_traj_ids) == 0:
+        if not self.active_traj_ids:
             return None
 
-        traj_id = int(random.choice(valid_traj_ids))
+        traj_id = int(random.choice(tuple(self.active_traj_ids)))
 
         curr_frame = int(self.traj_progress[traj_id])
         max_frame = int(self.traj_max_frame[traj_id])
@@ -118,73 +123,142 @@ class CurriculumController:
             key = self.generate_old_key()
             if key is not None:
                 return key
-            return self.generate_new_key()  
-    # ============================================================
-    # key statistics / classification
-    # ============================================================
-    def _ensure_key_stats(self, key):
-        if key not in self.key_stats:
-            self.key_stats[key] = {
-                "returns": deque(maxlen=self.window_size),
-                "mean_return": 0.0,
-                "visits": 0,
-                "all_returns": [],
-                "level": "buffer",
-            }
-            self.hist_buffer_count += 1   # 新 key 进入历史池，初始是 buffer
-        return self.key_stats[key]
-    
-    def update_key_stats(self, key, episode_return, min_filled=5, low=-0.2, high=0.4):
-        """
-        更新某个 key 的统计信息，并在满足条件时推进该轨迹的课程进度。
+            return self.generate_new_key()
 
-        key:
-            (traj_id, frame_idx, n_control)
+    # ============================================================
+    # frontier statistics / classification
+    # ============================================================
+    def _reset_frontier_stats_for_traj(self, traj_id: int):
+        """
+        某条轨迹出现新的 frontier 时，将其 frontier 统计重置为初始状态。
+        """
+        self.frontier_returns_by_traj[traj_id].clear()
+        self.frontier_visits_by_traj[traj_id] = 0
+        self.frontier_mean_return_by_traj[traj_id] = 0.0
+        self._set_frontier_level(traj_id, "buffer")
+
+    def _rebuild_frontier_stats(self):
+        """
+        全量重建当前 frontier 的分类缓存。
+        只在初始化和 advance_n 后调用。
+        """
+        self.frontier_counts = {
+            "buffer": 0,
+            "good": 0,
+            "hard": 0,
+            "easy": 0,
+        }
+        self.frontier_trajs_by_level = {
+            "buffer": set(),
+            "good": set(),
+            "hard": set(),
+            "easy": set(),
+        }
+
+        for traj_id in range(self.num_traj):
+            # 每次重建时，所有 frontier 统计都从初始 buffer 状态开始
+            self.frontier_returns_by_traj[traj_id].clear()
+            self.frontier_visits_by_traj[traj_id] = 0
+            self.frontier_mean_return_by_traj[traj_id] = 0.0
+            self.frontier_level_by_traj[traj_id] = "buffer"
+
+        for traj_id in self.active_traj_ids:
+            self.frontier_counts["buffer"] += 1
+            self.frontier_trajs_by_level["buffer"].add(int(traj_id))
+
+    def _set_frontier_level(self, traj_id, new_level):
+        """
+        增量更新某条轨迹当前 frontier 的 level。
+        同时同步：
+        - frontier_level_by_traj
+        - frontier_counts
+        - frontier_trajs_by_level
+        """
+        old_level = self.frontier_level_by_traj[traj_id]
+
+        if old_level == new_level:
+            return
+
+        if traj_id in self.active_traj_ids:
+            self.frontier_counts[old_level] -= 1
+            self.frontier_trajs_by_level[old_level].discard(traj_id)
+
+            self.frontier_counts[new_level] += 1
+            self.frontier_trajs_by_level[new_level].add(traj_id)
+
+        self.frontier_level_by_traj[traj_id] = new_level
+
+    def _remove_traj_from_frontier_cache(self, traj_id):
+        """
+        当轨迹课程推进到 0，不再属于 active frontier 时，从缓存中移除。
+        """
+        old_level = self.frontier_level_by_traj[traj_id]
+        self.frontier_trajs_by_level[old_level].discard(traj_id)
+        self.frontier_counts[old_level] -= 1
+
+    def _update_active_traj(self, traj_id):
+        """
+        根据 traj_progress[traj_id] 是否 > 0，维护 active_traj_ids。
+        """
+        if int(self.traj_progress[traj_id]) > 0:
+            self.active_traj_ids.add(int(traj_id))
+        else:
+            self.active_traj_ids.discard(int(traj_id))
+
+    def update_key_stats(self, key, episode_return, low=-0.2, high=0.4):
+        """
+        只更新“当前 frontier key”的统计。
+        old key 不参与课程统计。
 
         返回:
             mean_return, visits, level, advanced
         """
         self.step += 1
         traj_id, frame_idx, n_control = key
-        entry = self._ensure_key_stats(key)
 
-        old_level = entry["level"]
+        current_frontier_frame = int(self.traj_progress[traj_id])
 
-        # 1) 更新最近回报统计
-        r = float(episode_return)
-        entry["returns"].append(r)
-        entry["visits"] += 1
-        entry["all_returns"].append(r)
-        entry["mean_return"] = float(np.mean(entry["returns"]))
+        # old key：不参与课程统计，直接返回当前 frontier 的现状
+        if frame_idx != current_frontier_frame:
+            return (
+                float(self.frontier_mean_return_by_traj[traj_id]),
+                int(self.frontier_visits_by_traj[traj_id]),
+                self.frontier_level_by_traj[traj_id],
+                False,
+            )
 
-        # 2) 更新分类
-        filled = len(entry["returns"])
-        mean_return = entry["mean_return"]
+        # frontier key：更新 frontier 统计
+        returns_buf = self.frontier_returns_by_traj[traj_id]
+        returns_buf.append(float(episode_return))
 
-        all_zero = (filled >= min_filled) and all(abs(x) < 1e-8 for x in entry["returns"])
+        self.frontier_visits_by_traj[traj_id] += 1
+        mean_return = float(np.mean(returns_buf))
+        self.frontier_mean_return_by_traj[traj_id] = mean_return
+
+        min_filled = self.return_window_size
+        filled = len(returns_buf)
+        all_zero = (filled >= min_filled) and all(abs(x) < 1e-8 for x in returns_buf)
+
+        old_level = self.frontier_level_by_traj[traj_id]
 
         if filled < min_filled:
-            entry["level"] = "buffer"
+            new_level = "buffer"
         elif all_zero:
-            entry["level"] = "hard"
+            new_level = "hard"
         elif mean_return < low:
-            entry["level"] = "hard"
+            new_level = "hard"
         elif mean_return >= high:
-            entry["level"] = "easy"
+            new_level = "easy"
         else:
-            entry["level"] = "good"
+            new_level = "good"
 
-        new_level = entry["level"]
+        if old_level != new_level:
+            self._set_frontier_level(traj_id, new_level)
 
-        # 3) 历史池分类计数更新
-        if new_level != old_level:
-            self._dec_hist_level_count(old_level)
-            self._inc_hist_level_count(new_level)
-
-        # 4) 如果这是该轨迹当前 frontier，并且已经 easy，则推进一帧
+        # 如果当前 frontier 已经 easy，则推进一帧，并把新 frontier 重置为 buffer
         advanced = False
 
-        if frame_idx == int(self.traj_progress[traj_id]) and entry["level"] == "easy":
+        if new_level == "easy":
             if self.traj_progress[traj_id] > 0:
                 old_frame = int(self.traj_progress[traj_id])
 
@@ -194,17 +268,31 @@ class CurriculumController:
                 new_frame = int(self.traj_progress[traj_id])
                 advanced = True
 
+                # 更新 active 集合
+                self._update_active_traj(traj_id)
+
+                if new_frame > 0:
+                    # 新 frontier 是新的课程点，统计全部重置
+                    self._reset_frontier_stats_for_traj(traj_id)
+                else:
+                    # 已不再属于 active frontier，移出统计缓存
+                    self._remove_traj_from_frontier_cache(traj_id)
+                    self.frontier_returns_by_traj[traj_id].clear()
+                    self.frontier_visits_by_traj[traj_id] = 0
+                    self.frontier_mean_return_by_traj[traj_id] = 0.0
+                    self.frontier_level_by_traj[traj_id] = "buffer"
+
                 print(
                     f"[Curriculum] traj={traj_id} advance: "
                     f"{old_frame} -> {new_frame} (n={self.current_n})"
                 )
-            else:
-                print(
-                    f"[Curriculum] traj={traj_id} already at frame 0 "
-                    f"(n={self.current_n})"
-                )
 
-        return entry["mean_return"], entry["visits"], entry["level"], advanced
+        return (
+            float(self.frontier_mean_return_by_traj[traj_id]),
+            int(self.frontier_visits_by_traj[traj_id]),
+            self.frontier_level_by_traj[traj_id],
+            advanced,
+        )
 
     def advance_n(self):
         if self.current_n >= self.max_n:
@@ -218,8 +306,11 @@ class CurriculumController:
         self.traj_progress = self.traj_max_frame.copy()
         self.traj_curr_progress_sum = self.traj_max_progress_sum
 
-        # 清空旧统计（因为 key 里包含 n_control）
-        self.key_stats.clear()
+        # 重建 active 轨迹集合
+        self.active_traj_ids = set(np.where(self.traj_progress > 0)[0].astype(int).tolist())
+
+        # 所有 frontier 作为新课程点重新开始
+        self._rebuild_frontier_stats()
 
         print(
             f"[Curriculum] n advanced: {old_n} -> {self.current_n}, "
@@ -227,31 +318,15 @@ class CurriculumController:
         )
         return True
 
-
     # ============================================================
     # trajectory loading
     # ============================================================
     def load_trajectory_array(self, trajectory_path: str):
-        """
-        输入:
-            trajectory_path: trajectories.npz 路径
-
-        返回:
-            trajectories:
-                [
-                    (traj_len, frames),
-                    ...
-                ]
-
-            traj_progress:
-                shape = (num_traj,)
-                每条轨迹当前进度的初始值，按顺序保存为 traj_len - 1
-        """
         data = np.load(trajectory_path)
 
         starts = data["states"]
         traj_offsets = data["traj_offsets"]
-        cycles = data["cycles"]  # 调试打印用
+        cycles = data["cycles"]
 
         num_traj = len(traj_offsets) - 1
         traj_lengths = np.diff(traj_offsets)
@@ -280,8 +355,8 @@ class CurriculumController:
 
             for global_idx in range(start, end):
                 vec = starts[global_idx]
-                start = self.decode_frame_vector(vec)
-                frames.append(start)
+                frame = self.decode_frame_vector(vec)
+                frames.append(frame)
 
             trajectories.append((traj_len, frames))
 
@@ -304,18 +379,15 @@ class CurriculumController:
 
         idx = 0
 
-        # ball: x, y, vx, vy
         ball = vec[idx:idx + 4].astype(np.float32)
         idx += 4
 
-        # left team: 11 * (x, y, body, vx, vy)
         left_players = []
         for _ in range(11):
             x, y, body, vx, vy = vec[idx:idx + 5]
             left_players.append([x, y, body, vx, vy])
             idx += 5
 
-        # right team: 11 * (x, y, body, vx, vy)
         right_players = []
         for _ in range(11):
             x, y, body, vx, vy = vec[idx:idx + 5]
@@ -344,12 +416,6 @@ class CurriculumController:
         return env.agents.current_mask_n
 
     def apply_start_and_n_by_key(self, env, key):
-        """
-        根据 key:
-        - 取出对应 traj_id / frame_idx 的状态
-        - 设置 n_control
-        - 把 reset 状态写进 env
-        """
         traj_id, frame_idx, n_control = key
 
         _, start = self.get_starts_by_key(key)
@@ -368,12 +434,10 @@ class CurriculumController:
     def get_starts_by_key(self, key):
         """
         根据 key 取状态。
-
-        语义：
         - key 仍然是 (traj_id, frame_idx, n_control)
-        - 当 window_size == 1 时，直接取 frame_idx
-        - 当 window_size > 1 时，把 frame_idx 看作窗口右端点，
-        从 [frame_idx - window_size + 1, frame_idx] 中随机采样实际 frame_id
+        - 当 start_window_size == 1 时，直接取 frame_idx
+        - 当 start_window_size > 1 时，把 frame_idx 看作窗口右端点，
+          从 [frame_idx - start_window_size + 1, frame_idx] 中随机采样实际 frame_id
         """
         traj_id, frame_idx, n_control = key
 
@@ -387,16 +451,18 @@ class CurriculumController:
                 f"invalid frame_idx={frame_idx} for traj_id={traj_id}, traj_len={traj_len}"
             )
 
-        # window_size=1 时退化为原来的单帧逻辑
-        start_idx = max(0, int(frame_idx) - self.window_size + 1)
+        start_idx = max(0, int(frame_idx) - self.start_window_size + 1)
         end_idx = int(frame_idx)
 
         sampled_frame_idx = random.randint(start_idx, end_idx)
         start = frames[sampled_frame_idx]
 
         return sampled_frame_idx, start
-    
+
     def get_frontier_stats(self):
+        """
+        O(1) 返回当前 frontier 统计。
+        """
         stats = {}
 
         if self.traj_max_progress_sum <= 0:
@@ -408,43 +474,13 @@ class CurriculumController:
             )
             stats["progress_percent"] = 100.0 * stats["progress_ratio"]
 
-        stats["hist/buffer_count"] = self.hist_buffer_count
-        stats["hist/good_count"] = self.hist_good_count
-        stats["hist/hard_count"] = self.hist_hard_count
-        stats["hist/easy_count"] = self.hist_easy_count
+        stats["frontier/buffer_count"] = self.frontier_counts["buffer"]
+        stats["frontier/good_count"] = self.frontier_counts["good"]
+        stats["frontier/hard_count"] = self.frontier_counts["hard"]
+        stats["frontier/easy_count"] = self.frontier_counts["easy"]
 
         return stats
 
-    def _inc_hist_level_count(self, level):
-        if level == "buffer":
-            self.hist_buffer_count += 1
-        elif level == "good":
-            self.hist_good_count += 1
-        elif level == "hard":
-            self.hist_hard_count += 1
-        elif level == "easy":
-            self.hist_easy_count += 1
-        else:
-            raise ValueError(f"unknown level: {level}")
 
-    def _dec_hist_level_count(self, level):
-        if level == "buffer":
-            self.hist_buffer_count -= 1
-        elif level == "good":
-            self.hist_good_count -= 1
-        elif level == "hard":
-            self.hist_hard_count -= 1
-        elif level == "easy":
-            self.hist_easy_count -= 1
-        else:
-            raise ValueError(f"unknown level: {level}")
-        
 if __name__ == "__main__":
     controller = CurriculumController(init_n=1)
-
-    # print("\n[Main] trajectory loading finished.")
-    # print(f"[Main] number of trajectories = {len(controller.trajectories)}")
-
-    # if len(controller.trajectories) > 0:
-    #     first_len, _ = controller.trajectories[0]
-    #     print(f"[Main] first trajectory length = {first_len}")

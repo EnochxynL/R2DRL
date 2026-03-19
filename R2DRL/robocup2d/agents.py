@@ -304,7 +304,7 @@ class Agents:
         for idx, p in enumerate(self.player_list):
             p.write_body_target_deg(float(angles[idx]))
             
-    def set_default(self) -> None:
+    def reset_default(self) -> None:
 
         self.trainer.reset_players_and_ball(
             self.DEFAULT_BALL,
@@ -317,7 +317,7 @@ class Agents:
             p.take_empty_action(is_hybrid=is_hybrid)
         self.wait_all_ready()
 
-    def set_custom(self) -> None:
+    def reset_custom(self) -> None:
         CUSTOM_LEFT_PLAYERS_ZERO = self.zero_player_velocities(self.CUSTOM_LEFT_PLAYERS)
         CUSTOM_RIGHT_PLAYERS_ZERO = self.zero_player_velocities(self.CUSTOM_RIGHT_PLAYERS)
         for i in range(5):

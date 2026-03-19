@@ -89,19 +89,24 @@ class R2DRL:
         )
 
         self.global_episode = 0
+        self.tb_step = 0
         self.test_mode = False
         self.episode_key = None
         self.test_returns = []
 
     def reset(self, *args, **kwargs):
         self.flush_test_returns_to_tb()
+
+        # 每次 reset 记一次 step
+        self.tb_step += 1
+
         if self.test_mode:
             self.env.test_mode = True
             self.episode_key = None
         else:
             self.env.test_mode = False
             key = self.controller.generate_key()
-            
+
             self.episode_key = key
             self.controller.apply_start_and_n_by_key(
                 self.env,
@@ -125,11 +130,14 @@ class R2DRL:
                 if key is not None:
                     self.controller.update_key_stats(key, reward)
 
-                frontier_stats = self.controller.get_frontier_stats()
-                for name, value in frontier_stats.items():
-                    self.tb.add_scalar(f"curriculum/{name}", value, self.global_episode)
+                # 每 5 个 reset / episode 再写一次 TB
+                if self.tb_step % 5 == 0:
+                    frontier_stats = self.controller.get_frontier_stats()
+                    for name, value in frontier_stats.items():
+                        self.tb.add_scalar(f"curriculum/{name}", value, self.global_episode)
 
-                self.tb.flush()
+                    self.tb.flush()
+
                 self.global_episode += 1
 
         return reward, done, info
@@ -152,7 +160,7 @@ class R2DRL:
 
     def __getattr__(self, name):
         return getattr(self.env, name)
-    
+
     def flush_test_returns_to_tb(self):
         if (not self.test_mode) and len(self.test_returns) > 0:
             mean_return = float(np.mean(self.test_returns))
@@ -230,19 +238,14 @@ class Robocup2dEnv:
         if not self.agents.wait_all_ready():
             raise P.common.ShmProtocolError("Not READY Before Reset!!")
 
-        print(
-            f"[RESET] turn={self.turn_count}, score={self.score}, cycle={self.agents.coach.cycle()}",
-            flush=True
-        )
-
         if self.config.curriculum:
             if self.test_mode:
-                self.agents.set_default()
+                self.agents.reset_default()
             else:
-                self.agents.set_custom()
+                self.agents.reset_custom()
         else:
             if self.turn_count > 1 and int(goal) == 0:
-                self.agents.set_default()
+                self.agents.reset_default()
 
         self.agents.coach.clear_goal_flag()
 
