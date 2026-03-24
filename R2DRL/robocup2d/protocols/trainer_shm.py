@@ -103,6 +103,33 @@ class Trainer:
         self.write_opcode(opcode)
         self.write_request()
 
+    def _zero_player_slot(self) -> Tuple[float, float, float, float, float]:
+        return (0.0, 0.0, 0.0, 0.0, 0.0)
+
+    def _pad_players(
+        self,
+        players: Sequence[Tuple[float, float, float, float, float]],
+        target_len: int,
+        side_name: str,
+    ):
+        if len(players) > target_len:
+            raise ValueError(
+                f"{side_name} players too many: got {len(players)}, max {target_len}"
+            )
+
+        out = [tuple(map(float, p)) for p in players]
+
+        for p in out:
+            if len(p) != 5:
+                raise ValueError(
+                    f"{side_name} player entry must have 5 values, got {p}"
+                )
+
+        while len(out) < target_len:
+            out.append(self._zero_player_slot())
+
+        return out
+    
     # ================= payload =================
 
     def write_ball(self, bx, by, bvx, bvy):
@@ -112,8 +139,7 @@ class Trainer:
         struct.pack_into(_F32, self.buf, T_BALL_VY, float(bvy))
 
     def write_left_players(self, left_players: Sequence[Tuple[float, float, float, float, float]]):
-        if len(left_players) != N_LEFT:
-            raise ValueError
+        left_players = self._pad_players(left_players, N_LEFT, "left")
         for i, (x, y, deg, vx, vy) in enumerate(left_players):
             struct.pack_into(_F32, self.buf, T_LPX(i), float(x))
             struct.pack_into(_F32, self.buf, T_LPY(i), float(y))
@@ -122,8 +148,7 @@ class Trainer:
             struct.pack_into(_F32, self.buf, T_LVY(i), float(vy))
 
     def write_right_players(self, right_players: Sequence[Tuple[float, float, float, float, float]]):
-        if len(right_players) != N_RIGHT:
-            raise ValueError
+        right_players = self._pad_players(right_players, N_RIGHT, "right")
         for i, (x, y, deg, vx, vy) in enumerate(right_players):
             struct.pack_into(_F32, self.buf, T_RPX(i), float(x))
             struct.pack_into(_F32, self.buf, T_RPY(i), float(y))
@@ -152,6 +177,7 @@ class Trainer:
     def reset_players_and_ball(self, ball, left_players, right_players) -> None:
         """
         Write reset payload (ball + players) and trigger OP_RESET_FROM_PY.
+        left/right player counts may be <= 11; remaining slots are zero-padded.
         """
         self.write_reset_payload(ball, left_players, right_players)
         self.submit_opcode(OP_RESET_FROM_PY)

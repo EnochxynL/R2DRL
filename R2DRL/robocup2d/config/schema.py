@@ -7,7 +7,7 @@ class EnvConfig:
     def __init__(self, args: Dict[str, Any]):
 
         required_keys = [
-            "n1", "n2", "team1", "team2",
+            "n", "team",
             "episode_limit", "half_time", "seed",
             "goal_x", "goal_y", "HALF_LENGTH", "HALF_WIDTH",
             "host",
@@ -24,6 +24,8 @@ class EnvConfig:
             "trainer_ready_timeout_ms",
             "ports_wait_timeout", "server_wait_seconds",
             "curriculum",
+            "text_logging",
+            "game_logging",
 
             # curriculum parameters
             "init_n",
@@ -40,23 +42,27 @@ class EnvConfig:
                 raise KeyError(f"Missing required config field: '{k}'")
 
         # ---------- Team ----------
-        self.n1: int = self._require_int(args, "n1")
-        self.n2: int = self._require_int(args, "n2")
+        self.n: int = self._require_int(args, "n")
+        if self.n < 1:
+            raise ValueError(f"n must be >= 1, got {self.n}")
 
-        if self.n1 != self.n2:
-            raise ValueError(
-                f"Only symmetric teams supported, n1={self.n1}, n2={self.n2}"
-            )
+        self.team: str = self._require_str(args, "team").lower()
+        if self.team not in ("base", "hybrid"):
+            raise ValueError(f"Unknown team type: {self.team}")
 
+        # 兼容旧代码：仍然提供 n1/n2/team1/team2
+        self.n1: int = self.n
+        self.n2: int = self.n
         self.n_total: int = self.n1 + self.n2
 
-        self.team1: str = self._require_str(args, "team1").lower()
-        self.team2: str = self._require_str(args, "team2").lower()
+        self.team1: str = self.team
+        self.team2: str = self.team
 
-        if self.team1 not in ("base", "hybrid"):
-            raise ValueError(f"Unknown team1 type: {self.team1}")
+        self.is_hybrid: bool = (self.team == "hybrid")
 
-        self.is_hybrid = (self.team1 == "hybrid")
+        # ---------- Logging ----------
+        self.text_logging: bool = self._require_bool(args, "text_logging")
+        self.game_logging: bool = self._require_bool(args, "game_logging")
 
         # ---------- Episode ----------
         self.episode_limit: int = self._require_int(args, "episode_limit")
@@ -109,12 +115,11 @@ class EnvConfig:
 
         # ---------- Curriculum ----------
         self.curriculum: bool = self._require_bool(args, "curriculum")
-
         self.init_n: int = self._require_int(args, "init_n")
 
-        if not (1 <= self.init_n <= self.n1):
+        if not (1 <= self.init_n <= self.n):
             raise ValueError(
-                f"init_n must be between 1 and {self.n1}, got {self.init_n}"
+                f"init_n must be between 1 and {self.n}, got {self.init_n}"
             )
 
         # ---------- TensorBoard ----------
@@ -128,7 +133,6 @@ class EnvConfig:
 
         # ---------- Lib paths ----------
         lib_paths = args["lib_paths"]
-
         if not isinstance(lib_paths, list):
             raise TypeError("'lib_paths' must be a list of strings")
 

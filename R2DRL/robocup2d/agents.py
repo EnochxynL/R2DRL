@@ -184,9 +184,10 @@ class Agents:
         for idx, p in enumerate(self.player_list):
             if idx < n1:
                 act = int(actions[idx])
+                # act = int(p.default_base_action)
             else:
                 act = int(p.default_base_action)
-
+            
             p.write_base_action(act)
             p.write_request()
 
@@ -305,28 +306,38 @@ class Agents:
             p.write_body_target_deg(float(angles[idx]))
             
     def reset_default(self) -> None:
+        default_left_players, default_right_players = self._get_default_players_for_current_config()
+        default_body_angles = self._get_default_body_angles_for_current_config()
 
         self.trainer.reset_players_and_ball(
             self.DEFAULT_BALL,
-            self.DEFAULT_LEFT_PLAYERS,
-            self.DEFAULT_RIGHT_PLAYERS,
+            default_left_players,
+            default_right_players,
         )
-        self.write_all_body_targets(self.DEFAULT_BODY_ANGLES)
+        self.write_all_body_targets(default_body_angles)
+
         is_hybrid = (self.config.team1 == "hybrid")
         for p in self.player_list:
             p.take_empty_action(is_hybrid=is_hybrid)
         self.wait_all_ready()
 
     def reset_custom(self) -> None:
-        CUSTOM_LEFT_PLAYERS_ZERO = self.zero_player_velocities(self.CUSTOM_LEFT_PLAYERS)
-        CUSTOM_RIGHT_PLAYERS_ZERO = self.zero_player_velocities(self.CUSTOM_RIGHT_PLAYERS)
+        custom_left_players = self.CUSTOM_LEFT_PLAYERS
+        custom_right_players = self.CUSTOM_RIGHT_PLAYERS
+        custom_body_angles = self.CUSTOM_BODY_ANGLES
+
+
+        custom_left_players_zero = self.zero_player_velocities(custom_left_players)
+        custom_right_players_zero = self.zero_player_velocities(custom_right_players)
+
         for i in range(5):
             self.trainer.reset_players_and_ball(
                 self.CUSTOM_BALL,
-                CUSTOM_LEFT_PLAYERS_ZERO,
-                CUSTOM_RIGHT_PLAYERS_ZERO,
+                custom_left_players_zero,
+                custom_right_players_zero,
             )
-            self.write_all_body_targets(self.CUSTOM_BODY_ANGLES)
+            self.write_all_body_targets(custom_body_angles)
+
             is_hybrid = (self.config.team1 == "hybrid")
             for p in self.player_list:
                 p.take_empty_action(is_hybrid=is_hybrid)
@@ -334,10 +345,11 @@ class Agents:
 
         self.trainer.reset_players_and_ball(
             self.CUSTOM_BALL,
-            self.CUSTOM_LEFT_PLAYERS,
-            self.CUSTOM_RIGHT_PLAYERS,
+            custom_left_players,
+            custom_right_players,
         )
-        self.write_all_body_targets(self.CUSTOM_BODY_ANGLES)
+        self.write_all_body_targets(custom_body_angles)
+
         is_hybrid = (self.config.team1 == "hybrid")
         for p in self.player_list:
             p.take_empty_action(is_hybrid=is_hybrid)
@@ -405,6 +417,34 @@ class Agents:
 
         return out
 
+    # def set_agent_mask(self) -> np.ndarray:
+
+    #     n = min(int(self.current_mask_n), self.config.n1)
+
+    #     state = self.state(norm=False)
+
+    #     bx = float(state[0])
+    #     by = float(state[1])
+
+    #     players = state[4:].reshape(22, 6)
+
+    #     # coach 固定 22 槽，前 11 槽是 team1，后 11 槽是 team2
+    #     team1_slots = players[:11]
+
+    #     # 只取 team1 中真实存在的前 n1 个球员
+    #     team1_players = team1_slots[:self.config.n1]
+
+    #     px = team1_players[:, 0]
+    #     py = team1_players[:, 1]
+
+    #     dists = np.sqrt((px - bx) ** 2 + (py - by) ** 2)
+    #     nearest_idx = np.argsort(dists)[:n]
+
+    #     self.agent_mask[:] = False
+    #     self.agent_mask[nearest_idx] = True
+
+    #     return self.agent_mask.copy()
+    
     def set_agent_mask(self) -> np.ndarray:
 
         n = min(int(self.current_mask_n), self.config.n1)
@@ -415,19 +455,22 @@ class Agents:
         by = float(state[1])
 
         players = state[4:].reshape(22, 6)
-        team1_players = players[:self.config.n1]
+
+        team1_slots = players[:11]
+        team1_players = team1_slots[:self.config.n1]
 
         px = team1_players[:, 0]
         py = team1_players[:, 1]
 
         dists = np.sqrt((px - bx) ** 2 + (py - by) ** 2)
-        nearest_idx = np.argsort(dists)[:n]
+        sorted_idx = np.argsort(dists)
+        nearest_idx = sorted_idx[:n]
 
         self.agent_mask[:] = False
         self.agent_mask[nearest_idx] = True
 
         return self.agent_mask.copy()
-    
+
     def set_mask_n(self, n: int) -> int:
         """
         Configure how many team1 agents should be activated
@@ -453,11 +496,31 @@ class Agents:
         right_players: np.ndarray,
         body_angles: np.ndarray,
     ) -> None:
+        ball = np.asarray(ball, dtype=np.float32)
+        left_players = np.asarray(left_players, dtype=np.float32)
+        right_players = np.asarray(right_players, dtype=np.float32)
+        body_angles = np.asarray(body_angles, dtype=np.float32)
 
-        ball = ball.astype(np.float32, copy=False)
-        left_players = left_players.astype(np.float32, copy=False)
-        right_players = right_players.astype(np.float32, copy=False)
-        body_angles = body_angles.astype(np.float32, copy=False)
+        if ball.shape not in [(2,), (4,)]:
+            raise ValueError(
+                f"ball must have shape (2,) or (4,), got {ball.shape}"
+            )
+
+        if left_players.shape != (self.config.n1, 5):
+            raise ValueError(
+                f"left_players must have shape ({self.config.n1}, 5), got {left_players.shape}"
+            )
+
+        if right_players.shape != (self.config.n2, 5):
+            raise ValueError(
+                f"right_players must have shape ({self.config.n2}, 5), got {right_players.shape}"
+            )
+
+        expected_angles = self.config.n1 + self.config.n2
+        if body_angles.shape != (expected_angles,):
+            raise ValueError(
+                f"body_angles must have shape ({expected_angles},), got {body_angles.shape}"
+            )
 
         self.CUSTOM_BALL = tuple(ball.tolist())
         self.CUSTOM_LEFT_PLAYERS = [tuple(row) for row in left_players.tolist()]
@@ -466,3 +529,36 @@ class Agents:
 
     def zero_player_velocities(self, players):
         return [(x, y, body, 0.0, 0.0) for x, y, body, vx, vy in players]
+    
+    def _get_default_players_for_current_config(self):
+        """
+        从固定 11v11 默认模板中，截取当前 n1/n2 需要的真实球员。
+        """
+        left_players = list(self.DEFAULT_LEFT_PLAYERS[:self.config.n1])
+        right_players = list(self.DEFAULT_RIGHT_PLAYERS[:self.config.n2])
+        return left_players, right_players
+
+    def _get_default_body_angles_for_current_config(self):
+        """
+        DEFAULT_BODY_ANGLES 的组织方式是：
+        [left_1 ... left_11, right_1 ... right_11]
+
+        当前 player_list 的组织方式是：
+        team1 前 n1 人 + team2 前 n2 人
+
+        所以这里只需要按当前 n1/n2 截取并拼接。
+        """
+        angles = np.asarray(self.DEFAULT_BODY_ANGLES, dtype=np.float32)
+
+        left_angles = angles[:11][:self.config.n1]
+        right_angles = angles[11:22][:self.config.n2]
+
+        out = np.concatenate([left_angles, right_angles], axis=0)
+
+        expected = self.config.n1 + self.config.n2
+        if out.shape != (expected,):
+            raise ValueError(
+                f"default body angles shape mismatch: got {out.shape}, expected ({expected},)"
+            )
+
+        return out

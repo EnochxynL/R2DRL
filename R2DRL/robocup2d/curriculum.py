@@ -2,10 +2,10 @@ from __future__ import annotations
 import random
 import numpy as np
 from collections import deque
-
+import os
 
 class CurriculumController:
-    def __init__(self, init_n=1, start_window_size=3, return_window_size=5):
+    def __init__(self, init_n=1, start_window_size=1, return_window_size=5):
 
         self.current_n = init_n
 
@@ -15,13 +15,21 @@ class CurriculumController:
 
         # 统计最近 return 的滑动窗口长度（只针对当前 frontier）
         self.return_window_size = int(return_window_size)
-
-        self.trajectories, self.traj_progress = self.load_trajectory_array("./trajectories.npz")
+        self.n_players = 0
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        traj_path = os.path.join(base_dir, "trajectories", "3v3trajectories.npz")
+        self.trajectories, self.traj_progress = self.load_trajectory_array(traj_path)
         self.traj_max_frame = self.traj_progress.copy()
         self.traj_max_progress_sum = float(np.sum(self.traj_max_frame))
         self.traj_curr_progress_sum = self.traj_max_progress_sum
 
-        self.max_n = 11
+        self.max_n = self.n_players
+        if self.current_n > self.max_n:
+            print(f"[Curriculum] init_n={self.current_n} > max_n={self.max_n}, clamp to max_n")
+            self.current_n = self.max_n
+
+        print(f"[Curriculum] detected players per side = {self.n_players}")
+        print(f"[Curriculum] max_n = {self.max_n}")
         self.step = 0
 
         self.num_traj = len(self.trajectories)
@@ -42,91 +50,100 @@ class CurriculumController:
         # 当前 frontier 的分类计数
         self.frontier_counts = {
             "buffer": 0,
-            "good": 0,
-            "hard": 0,
+            "lose": 0,
+            "mixed": 0,
+            "draw": 0,
+            "win": 0,
             "easy": 0,
         }
 
         # 当前 frontier 按 level 分组的轨迹集合
         self.frontier_trajs_by_level = {
             "buffer": set(),
-            "good": set(),
-            "hard": set(),
+            "lose": set(),
+            "mixed": set(),
+            "draw": set(),
+            "win": set(),
             "easy": set(),
         }
 
-        # hard 自适应采样参数
-        self.target_hard_ratio = 0.35
-        self.base_hard_prob = 0.20
-        self.hard_prob_gain = 0.80
-        self.min_hard_prob = 0.10
-        self.max_hard_prob = 0.40
+        self.advance_check_interval = 5000
+        self.advance_threshold = 5
+        self.period_update_count = 0
+        self.period_advanced_count = 0
 
         self._rebuild_frontier_stats()
 
-    def _compute_adaptive_hard_prob(self):
-        """
-        根据当前 frontier 中 good / hard 的比例，自适应计算 hard 的采样概率。
-        目标：当 hard 堆积过多时，提高 hard 抽样概率，把 hard 压回可接受范围。
-        """
-        g = len(self.frontier_trajs_by_level["good"])
-        h = len(self.frontier_trajs_by_level["hard"])
-
-        if h == 0:
-            return 0.0
-        if g == 0:
-            return self.max_hard_prob
-
-        hard_ratio = h / float(g + h)
-
-        p_hard = (
-            self.base_hard_prob
-            + self.hard_prob_gain * (hard_ratio - self.target_hard_ratio)
-        )
-
-        p_hard = max(self.min_hard_prob, min(self.max_hard_prob, p_hard))
-        return float(p_hard)
-    
     def generate_new_key(self):
         """
         当前 frontier 采样逻辑：
         1. 如果还有 buffer，优先只从 buffer 里抽
-        2. 如果没有 buffer，则在 good / hard 中做自适应采样
+        2. 如果没有 buffer：
+        - 若 win 数量 < 20，就对所有轨迹均匀抽样
+        - 否则按默认固定权重采样
         3. easy 不参与 new key 采样
         """
         if len(self.trajectories) == 0:
             raise ValueError("no trajectories loaded")
 
-        # 1) 只要还有 buffer，就只从 buffer 里抽
         if self.frontier_trajs_by_level["buffer"]:
             traj_id = min(self.frontier_trajs_by_level["buffer"])
             frame_idx = int(self.traj_progress[traj_id])
             return (traj_id, frame_idx, self.current_n)
 
-        good_trajs = list(self.frontier_trajs_by_level["good"])
-        hard_trajs = list(self.frontier_trajs_by_level["hard"])
+        level_to_trajs = {
+            "win": list(self.frontier_trajs_by_level["win"]),
+            "draw": list(self.frontier_trajs_by_level["draw"]),
+            "mixed": list(self.frontier_trajs_by_level["mixed"]),
+            "lose": list(self.frontier_trajs_by_level["lose"]),
+        }
 
-        if not good_trajs and not hard_trajs:
+        win_count = len(level_to_trajs["win"])
+
+        all_candidate_trajs = (
+            level_to_trajs["win"]
+            + level_to_trajs["draw"]
+            + level_to_trajs["mixed"]
+            + level_to_trajs["lose"]
+        )
+
+        if not all_candidate_trajs:
             return None
 
-        if not good_trajs:
-            traj_id = int(random.choice(hard_trajs))
+        # win 太少时：对所有轨迹均匀抽样
+        if win_count < 20:
+            traj_id = int(random.choice(all_candidate_trajs))
             frame_idx = int(self.traj_progress[traj_id])
             return (traj_id, frame_idx, self.current_n)
 
-        if not hard_trajs:
-            traj_id = int(random.choice(good_trajs))
+        # 否则：按默认固定权重采样
+        base_weights = {
+            "win": 0.4,
+            "mixed": 0.3,
+            "draw": 0.2,
+            "lose": 0.1,
+        }
+
+        candidate_levels = []
+        candidate_weights = []
+        for lvl in ["win", "draw", "mixed", "lose"]:
+            if level_to_trajs[lvl]:
+                candidate_levels.append(lvl)
+                candidate_weights.append(base_weights[lvl])
+
+        if not candidate_levels:
+            return None
+
+        weight_sum = sum(candidate_weights)
+        if weight_sum <= 0:
+            traj_id = int(random.choice(all_candidate_trajs))
             frame_idx = int(self.traj_progress[traj_id])
             return (traj_id, frame_idx, self.current_n)
 
-        # 2) hard 比例自适应控制
-        p_hard = self._compute_adaptive_hard_prob()
+        candidate_weights = [w / weight_sum for w in candidate_weights]
+        chosen_level = random.choices(candidate_levels, weights=candidate_weights, k=1)[0]
 
-        if random.random() < p_hard:
-            traj_id = int(random.choice(hard_trajs))
-        else:
-            traj_id = int(random.choice(good_trajs))
-
+        traj_id = int(random.choice(level_to_trajs[chosen_level]))
         frame_idx = int(self.traj_progress[traj_id])
         return (traj_id, frame_idx, self.current_n)
 
@@ -153,10 +170,16 @@ class CurriculumController:
 
     def generate_key(self, p_new=0.8):
         """
-        按给定概率混合采样:
-        - p_new 概率采样 new key
-        - 1 - p_new 概率采样 old key
+        按给定概率混合采样，但如果当前还有 buffer，
+        则优先直接返回 buffer 对应的 new key。
+
+        逻辑：
+        1. 如果 frontier 里还有 buffer，直接走 generate_new_key()
+        2. 否则再按 p_new 决定走 new / old
         """
+        if self.frontier_trajs_by_level["buffer"]:
+            return self.generate_new_key()
+
         use_new = (random.random() < p_new)
 
         if use_new:
@@ -189,14 +212,18 @@ class CurriculumController:
         """
         self.frontier_counts = {
             "buffer": 0,
-            "good": 0,
-            "hard": 0,
+            "lose": 0,
+            "mixed": 0,
+            "draw": 0,
+            "win": 0,
             "easy": 0,
         }
         self.frontier_trajs_by_level = {
             "buffer": set(),
-            "good": set(),
-            "hard": set(),
+            "lose": set(),
+            "mixed": set(),
+            "draw": set(),
+            "win": set(),
             "easy": set(),
         }
 
@@ -250,10 +277,18 @@ class CurriculumController:
         else:
             self.active_traj_ids.discard(int(traj_id))
 
-    def update_key_stats(self, key, episode_return, low=-0.2, high=0.4):
+    def update_key_stats(self, key, episode_return, high=0.4):
         """
         只更新“当前 frontier key”的统计。
         old key 不参与课程统计。
+
+        level 规则：
+        - filled < window                -> buffer
+        - mean_return >= high            -> easy
+        - mean_return > 0                -> win
+        - mean_return < 0                -> lose
+        - mean_return == 0 且全是 0      -> draw
+        - mean_return == 0 且有输有赢    -> mixed
 
         返回:
             mean_return, visits, level, advanced
@@ -282,20 +317,27 @@ class CurriculumController:
 
         min_filled = self.return_window_size
         filled = len(returns_buf)
-        all_zero = (filled >= min_filled) and all(abs(x) < 1e-8 for x in returns_buf)
 
         old_level = self.frontier_level_by_traj[traj_id]
 
+        all_zero = (filled >= min_filled) and all(abs(x) < 1e-8 for x in returns_buf)
+        has_pos = any(x > 1e-8 for x in returns_buf)
+        has_neg = any(x < -1e-8 for x in returns_buf)
+
         if filled < min_filled:
             new_level = "buffer"
-        elif all_zero:
-            new_level = "hard"
-        elif mean_return < low:
-            new_level = "hard"
         elif mean_return >= high:
             new_level = "easy"
+        elif mean_return > 1e-8:
+            new_level = "win"
+        elif mean_return < -1e-8:
+            new_level = "lose"
+        elif all_zero:
+            new_level = "draw"
+        elif has_pos and has_neg:
+            new_level = "mixed"
         else:
-            new_level = "good"
+            new_level = "draw"
 
         if old_level != new_level:
             self._set_frontier_level(traj_id, new_level)
@@ -332,6 +374,11 @@ class CurriculumController:
                     f"{old_frame} -> {new_frame} (n={self.current_n})"
                 )
 
+        # 统计当前周期
+        self.period_update_count += 1
+        if advanced:
+            self.period_advanced_count += 1
+            
         return (
             float(self.frontier_mean_return_by_traj[traj_id]),
             int(self.frontier_visits_by_traj[traj_id]),
@@ -373,6 +420,15 @@ class CurriculumController:
         traj_offsets = data["traj_offsets"]
         cycles = data["cycles"]
 
+        if starts.ndim != 2:
+            raise ValueError(f"states must be 2D, got shape={starts.shape}")
+
+        frame_dim = int(starts.shape[1])
+        self.n_players = self.infer_n_players_from_state_dim(frame_dim)
+
+        print(f"[Trajectory] inferred frame_dim = {frame_dim}")
+        print(f"[Trajectory] inferred players per side = {self.n_players}")
+
         num_traj = len(traj_offsets) - 1
         traj_lengths = np.diff(traj_offsets)
 
@@ -398,7 +454,7 @@ class CurriculumController:
             traj_len = end - start
             frames = []
 
-            for global_idx in range(start, end):
+            for local_idx, global_idx in enumerate(range(start, end)):
                 vec = starts[global_idx]
                 frame = self.decode_frame_vector(vec)
                 frames.append(frame)
@@ -406,7 +462,7 @@ class CurriculumController:
             trajectories.append((traj_len, frames))
 
             # 初始课程进度 = 该轨迹最后倒数2帧的 frame_idx
-            traj_progress[traj_id] = traj_len - 3
+            traj_progress[traj_id] = max(0, traj_len - 3)
 
         print(f"[Curriculum] traj_progress.shape = {traj_progress.shape}")
         print(f"[Curriculum] first 10 traj_progress = {traj_progress[:10].tolist()}")
@@ -417,10 +473,14 @@ class CurriculumController:
     # decode frame
     # ============================================================
     def decode_frame_vector(self, vec: np.ndarray):
-        vec = np.asarray(vec, dtype=np.float32)
+        vec = np.asarray(vec, dtype=np.float32).reshape(-1)
 
-        if vec.shape[0] != 114:
-            raise ValueError(f"frame dim must be 114, got {vec.shape[0]}")
+        expected_dim = 4 + 10 * int(self.n_players)
+        if vec.shape[0] != expected_dim:
+            raise ValueError(
+                f"frame dim must be {expected_dim} for n_players={self.n_players}, "
+                f"got {vec.shape[0]}"
+            )
 
         idx = 0
 
@@ -428,13 +488,13 @@ class CurriculumController:
         idx += 4
 
         left_players = []
-        for _ in range(11):
+        for _ in range(self.n_players):
             x, y, body, vx, vy = vec[idx:idx + 5]
             left_players.append([x, y, body, vx, vy])
             idx += 5
 
         right_players = []
-        for _ in range(11):
+        for _ in range(self.n_players):
             x, y, body, vx, vy = vec[idx:idx + 5]
             right_players.append([x, y, body, vx, vy])
             idx += 5
@@ -520,12 +580,73 @@ class CurriculumController:
             stats["progress_percent"] = 100.0 * stats["progress_ratio"]
 
         stats["frontier/buffer_count"] = self.frontier_counts["buffer"]
-        stats["frontier/good_count"] = self.frontier_counts["good"]
-        stats["frontier/hard_count"] = self.frontier_counts["hard"]
+        stats["frontier/win_count"] = self.frontier_counts["win"]
+        stats["frontier/draw_count"] = self.frontier_counts["draw"]
+        stats["frontier/mixed_count"] = self.frontier_counts["mixed"]
+        stats["frontier/lose_count"] = self.frontier_counts["lose"]
         stats["frontier/easy_count"] = self.frontier_counts["easy"]
+
+        stats["current_n"] = self.current_n
+        stats["advance_cycle/advanced_count"] = self.period_advanced_count
 
         return stats
 
+    def should_advance_n(self):
+        if self.current_n >= self.max_n:
+            return False
+
+        if self.period_update_count < self.advance_check_interval:
+            return False
+
+        should_upgrade = (self.period_advanced_count < self.advance_threshold)
+
+        # 无论升不升级，都开始下一个 5000 更新周期
+        self.period_update_count = 0
+        self.period_advanced_count = 0
+
+        return should_upgrade
+
+    def infer_n_players_from_state_dim(self, frame_dim: int) -> int:
+        """
+        从单帧向量维度自动推断每边人数。
+
+        约定：
+            frame = [ball(4), left(n*5), right(n*5)]
+        所以：
+            frame_dim = 4 + 10 * n
+        """
+        frame_dim = int(frame_dim)
+
+        if frame_dim < 14:
+            raise ValueError(
+                f"frame dim too small: {frame_dim}, expected at least 14"
+            )
+
+        remain = frame_dim - 4
+        if remain % 10 != 0:
+            raise ValueError(
+                f"cannot infer n_players from frame_dim={frame_dim}, "
+                f"expected frame_dim = 4 + 10*n"
+            )
+
+        n_players = remain // 10
+        if n_players <= 0:
+            raise ValueError(f"invalid n_players={n_players}")
+
+        return int(n_players)
 
 if __name__ == "__main__":
     controller = CurriculumController(init_n=1)
+
+    # 取第一条轨迹
+    traj_len, frames = controller.trajectories[0]
+
+    # 最后一帧
+    last_frame = frames[-1]
+
+    print("=== First trajectory last frame ===")
+    print("traj_len:", traj_len)
+    print("ball:", last_frame["ball"])
+    print("left_players:", last_frame["left_players"])
+    print("right_players:", last_frame["right_players"])
+    print("body_angles:", last_frame["body_angles"])

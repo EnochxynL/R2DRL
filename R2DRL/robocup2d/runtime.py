@@ -139,6 +139,8 @@ class Runtime:
             half_time=self.config.half_time,
             env=env,
             log_tag=f"{self.run_id}_",
+            text_logging=self.config.text_logging,
+            game_logging=self.config.game_logging,
         )
         self.procs.append(p)
 

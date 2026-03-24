@@ -86,6 +86,8 @@ def launch_server(
     env: Optional[dict] = None,
     log_tag: str = "",
     extra_args: Optional[List[str]] = None,
+    text_logging: bool = False,
+    game_logging: bool = True,
 ) -> Tuple[subprocess.Popen, LogFP]:
     """
     Launch rcssserver with standard flags (synch/auto/coach) + ports.
@@ -107,8 +109,8 @@ def launch_server(
         f"--server::half_time={half_time}",
         f"--server::game_log_dir={rcg_dir}",
         f"--server::text_log_dir={rcg_dir}",
-        "--server::text_logging=false",
-        "--server::game_logging=false",
+        f"--server::text_logging={text_logging}",
+        f"--server::game_logging={game_logging}",
 
         # stamina 不影响
         "--server::stamina_capacity=-1",
@@ -345,11 +347,13 @@ def launch_players(
 
     # team1
     _launch_one(1, team1, 1, mode1)
-    time.sleep(0.1)  # slight delay to avoid all players starting at the exact same time
+    time.sleep(1)  # slight delay to avoid all players starting at the exact same time
     for unum in range(2, int(n1) + 1):
         _launch_one(1, team1, unum, mode1)
-    time.sleep(5)
+    time.sleep(3)
     # team2
-    for unum in range(1, int(n2) + 1):
+    _launch_one(2, team2, 1, mode2)
+    time.sleep(1)  # slight delay to avoid all players starting at the exact same time
+    for unum in range(2, int(n2) + 1):
         _launch_one(2, team2, unum, mode2)
     return procs, fps
