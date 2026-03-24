@@ -1060,10 +1060,7 @@ SamplePlayer::handlePlayerType()
   virtual method in super class
 */
 
-void SamplePlayer::communicationImpl()
-{
-    return;
-}
+
 void
 SamplePlayer::communicationImpl()
 {

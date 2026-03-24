@@ -417,34 +417,6 @@ class Agents:
 
         return out
 
-    # def set_agent_mask(self) -> np.ndarray:
-
-    #     n = min(int(self.current_mask_n), self.config.n1)
-
-    #     state = self.state(norm=False)
-
-    #     bx = float(state[0])
-    #     by = float(state[1])
-
-    #     players = state[4:].reshape(22, 6)
-
-    #     # coach 固定 22 槽，前 11 槽是 team1，后 11 槽是 team2
-    #     team1_slots = players[:11]
-
-    #     # 只取 team1 中真实存在的前 n1 个球员
-    #     team1_players = team1_slots[:self.config.n1]
-
-    #     px = team1_players[:, 0]
-    #     py = team1_players[:, 1]
-
-    #     dists = np.sqrt((px - bx) ** 2 + (py - by) ** 2)
-    #     nearest_idx = np.argsort(dists)[:n]
-
-    #     self.agent_mask[:] = False
-    #     self.agent_mask[nearest_idx] = True
-
-    #     return self.agent_mask.copy()
-    
     def set_agent_mask(self) -> np.ndarray:
 
         n = min(int(self.current_mask_n), self.config.n1)
