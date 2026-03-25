@@ -95,7 +95,6 @@ class R2DRL:
         self.test_returns = []
 
     def reset(self, *args, **kwargs):
-        print(f"self.test_mode={self.test_mode}",flush=True)
         self.flush_test_returns_to_tb()
 
         # 每次 reset 记一次 step
@@ -107,7 +106,6 @@ class R2DRL:
         else:
             self.env.test_mode = False
             key = self.controller.generate_key()
-            print(f"key={key}")
 
             self.episode_key = key
             self.controller.apply_start_and_n_by_key(
@@ -240,6 +238,7 @@ class Robocup2dEnv:
         if not self.agents.wait_all_ready():
             raise P.common.ShmProtocolError("Not READY Before Reset!!")
         print(f"[RESET] turn={self.turn_count}, score=[{self.score[0]},{self.score[1]}], cycle={cycle}")
+        
         if self.config.curriculum:
             if self.test_mode:
                 self.agents.reset_default()

@@ -1966,6 +1966,12 @@ void SamplePlayer::setActionMask() {
     action_mask[17] = false;  
     action_mask[18] = false;  
 
+    // 能射门时，其他动作全部禁用
+    if (action_mask[1]) {
+        for (int i = 0; i < BASE_ACTION_NUM; ++i) {
+            if (i != 1) action_mask[i] = false;
+        }
+    }
 }
 
 
