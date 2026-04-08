@@ -1,0 +1,6 @@
+[submodule "proxy"]
+	path = proxy
+	url = https://github.com/EnochxynL/soccer-simulation-proxy.git
+[submodule "librcsc"]
+	path = librcsc
+	url = https://github.com/EnochxynL/librcsc.git
